@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from langchain_core.tools import tool
 
+from .meme_tool import add_meme_image, choose_meme
+
 
 @tool
 def echo(message: str = "") -> dict[str, str]:
@@ -24,5 +26,5 @@ def time_now(timezone: str = "UTC") -> dict[str, str]:
     return {"timezone": timezone, "now": now.isoformat()}
 
 
-BUILTIN_TOOLS = [echo, time_now]
+BUILTIN_TOOLS = [echo, time_now, choose_meme, add_meme_image]
 
