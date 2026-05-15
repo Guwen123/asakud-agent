@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from agent_loop.bootstrap import bootstrap
 from agent_loop.config_loader import load_config, project_path
 from agent_loop.loop import run_agent_once_async
+from agent_loop.model_factory import build_chat_model
+from agent_loop.workflow import AgentWorkflow
 from http_client import AsyncHttpClient
 from memory.markdown import add_markdown_memory, list_markdown_memories
 from memory.routing import route_storage_with_llm
@@ -41,6 +43,11 @@ class StorageRouteRequest(BaseModel):
     context: str = ""
 
 
+class WorkflowRequest(BaseModel):
+    message: str
+    workflow_type: str = "basic"  # "basic" or "advanced"
+
+
 class HealthResponse(BaseModel):
     status: str
     agent: str
@@ -55,6 +62,10 @@ def ensure_app_state(app: FastAPI) -> None:
         app.state.tools = ToolRegistry(app.state.config.get("tools", {}).get("enabled"))
     if not hasattr(app.state, "http_client"):
         app.state.http_client = AsyncHttpClient()
+    if not hasattr(app.state, "workflow"):
+        app.state.workflow = AgentWorkflow(app.state.config)
+    if not hasattr(app.state, "route_llm"):
+        app.state.route_llm = build_chat_model(app.state.config, model_key="route_model")
 
 
 async def scheduled_task_loop(app: FastAPI) -> None:
@@ -71,6 +82,7 @@ async def lifespan(app: FastAPI):
     app.state.tools = ToolRegistry(app.state.config.get("tools", {}).get("enabled"))
     app.state.http_client = AsyncHttpClient()
     await app.state.http_client.start()
+    app.state.route_llm = build_chat_model(app.state.config, model_key="route_model")
     app.state.scheduler_task = asyncio.create_task(scheduled_task_loop(app))
     try:
         yield
@@ -159,6 +171,20 @@ async def route_storage(request: StorageRouteRequest) -> dict[str, Any]:
         "should_write_markdown": decision.should_write_markdown,
         "should_write_rag": decision.should_write_rag,
     }
+
+
+@app.post("/workflow/chat", response_model=ChatResponse)
+async def workflow_chat(request: WorkflowRequest) -> ChatResponse:
+    ensure_app_state(app)
+    config = app.state.config
+
+    # 获取模型配置
+    model_config = config["model"]
+    # 这里需要根据配置创建合适的模型
+    # 暂时使用现有的 run_agent_once_async 作为后备
+    output = await run_agent_once_async(request.message)
+
+    return ChatResponse(output=output)
 
 
 if __name__ == "__main__":

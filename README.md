@@ -22,6 +22,7 @@ Useful endpoints:
 
 - `GET /health`
 - `POST /chat`
+- `POST /workflow/chat`
 - `GET /tools`
 - `POST /tools/{tool_name}/run`
 - `GET /memory/markdown`
@@ -52,6 +53,8 @@ agent.config.md
 - `db/schemas/`: database record classes.
 - `db/utils/`: database JSON and id helpers.
 - `agent_loop/loop.py`: minimal loop that loads config and memory.
+- `agent_loop/nodes.py`: LangGraph node management and tool integration.
+- `agent_loop/workflow.py`: Agent workflow construction using LangGraph StateGraph.
 - `memory/markdown/`: Markdown memory target discovery and write logic.
 - `memory/routing/`: LLM-based storage routing.
 - `memory/schemas/`: memory routing and Markdown memory data classes.
@@ -79,6 +82,18 @@ Tools use LangGraph/LangChain-compatible objects:
 - Built-in tools are defined with `langchain_core.tools.tool`.
 - `ToolRegistry` stores `BaseTool` instances.
 - `ToolRegistry.to_tool_node()` returns a `langgraph.prebuilt.ToolNode`.
+
+## LangGraph Workflows
+
+The agent supports LangGraph-based workflows for complex agent interactions:
+
+- `agent_loop/nodes.py`: `AgentNodes` class manages LangGraph nodes including tool nodes, agent nodes, memory nodes, and routing nodes.
+- `agent_loop/workflow.py`: `AgentWorkflow` class builds StateGraph workflows with conditional edges and state management.
+- `POST /workflow/chat`: New endpoint for LangGraph-powered conversations with configurable workflow types ("basic" or "advanced").
+
+Workflow types:
+- **Basic**: Simple agent -> tools -> end flow
+- **Advanced**: Includes memory management and routing decisions
 
 ## Rule
 
