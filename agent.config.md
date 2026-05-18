@@ -20,7 +20,7 @@
     "provider": "token-plan-cn",
     "protocol": "openai-compatible",
     "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "tp-cz1ic9i3klox7dtpmjortmi5tb1uutc2h29orx27efpf8a32",
+    "api_key": "",
     "name": "MiMo-V2.5-Pro",
     "temperature": 0.2,
     "max_output_tokens": 4096,
