@@ -8,81 +8,80 @@ from langchain_core.runnables import Runnable, RunnableLambda
 
 from .config_loader import load_config
 from .model_factory import build_chat_model
-from memory.routing.parsers import extract_text, parse_json_response
 
 
-SYSTEM_PROMPT = """你是 Sakuro Agent 的路由判定器。
-你只输出一个 JSON 对象，用于决定下一步执行路径。
-输出应包含：
-- destination: agent 或 memory
-- memory_source: markdown 或 rag
-- rag_mode: direct 或 hybrid_rerank
-- use_tool: true 或 false
-- plan: 简要说明应该执行的步骤
-
-如果消息需要使用长期知识或检索，memory_source 应该是 rag 或 markdown。
-如果消息是普通对话或工具调用，destination 应该是 agent。
-如果需要在 agent 中执行 Meme 相关工具，则 destination 仍然是 agent，use_tool 可以为 true。
-"""
-
-
-def _parse_route_response(response: Any) -> dict[str, Any]:
-    text = extract_text(response)
-    payload = parse_json_response(text)
-    return {
-        "destination": payload.get("destination", "agent").strip().lower(),
-        "memory_source": payload.get("memory_source", "markdown").strip().lower(),
-        "rag_mode": payload.get("rag_mode", "direct").strip().lower(),
-        "use_tool": bool(payload.get("use_tool", False)),
-        "plan": payload.get("plan", ""),
-    }
+ROUTER_PROMPT = (
+    "You are a workflow router. Return JSON only.\n"
+    "Fields:\n"
+    "- read_md: true/false\n"
+    "- read_rag: true/false\n"
+    "- use_tool: true/false\n"
+    "- read_md_after_tool: true/false\n"
+    "- rag_mode: direct or hybrid_rerank\n"
+    "- plan: short text\n"
+)
 
 
 def get_routing_node(config: dict | None = None) -> Runnable:
-    """使用配置文件中的 LLM 来做路由判断。"""
     cfg = config or load_config()
     route_llm = build_chat_model(cfg, model_key="route_model")
 
     def _run(state: dict[str, Any]) -> dict[str, Any]:
         messages = state.get("messages", [])
-        if not messages:
-            state["routing"] = {
-                "destination": "agent",
-                "memory_source": "markdown",
-                "rag_mode": "direct",
-                "use_tool": False,
-                "plan": "",
-            }
-            state["next"] = "agent"
-            return state
+        content = ""
+        if messages:
+            content = str(getattr(messages[-1], "content", "") or "")
 
-        last_message = messages[-1]
-        content = getattr(last_message, "content", None) or str(last_message)
-        payload = {
-            "content": content,
-            "memory_source": "markdown",
-            "rag_mode": "direct",
-            "use_tool": False,
-            "plan": "请根据用户输入生成下一步执行计划。",
-        }
-
-        response = route_llm.invoke([
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-        ])
-
-        routing = _parse_route_response(response)
-        if routing["destination"] not in {"agent", "memory"}:
-            routing["destination"] = "agent"
-        if routing["memory_source"] not in {"markdown", "rag"}:
-            routing["memory_source"] = "markdown"
-        if routing["rag_mode"] not in {"direct", "hybrid_rerank"}:
-            routing["rag_mode"] = "direct"
-        if routing["destination"] != "memory":
-            routing["memory_source"] = "markdown"
-
-        state["routing"] = routing
-        state["next"] = routing["destination"]
+        response = route_llm.invoke(
+            [
+                SystemMessage(content=ROUTER_PROMPT),
+                HumanMessage(content=json.dumps({"content": content}, ensure_ascii=False)),
+            ]
+        )
+        payload = _parse_router_payload(_extract_text(response))
+        state["routing"] = payload
         return state
 
     return RunnableLambda(_run)
+
+
+def _parse_router_payload(text: str) -> dict[str, Any]:
+    payload = _parse_json(text)
+    rag_mode = str(payload.get("rag_mode", "direct")).strip().lower()
+    if rag_mode not in {"direct", "hybrid_rerank"}:
+        rag_mode = "direct"
+    return {
+        "read_md": bool(payload.get("read_md", True)),
+        "read_rag": bool(payload.get("read_rag", False)),
+        "use_tool": bool(payload.get("use_tool", False)),
+        "read_md_after_tool": bool(payload.get("read_md_after_tool", False)),
+        "rag_mode": rag_mode,
+        "plan": str(payload.get("plan", "")),
+    }
+
+
+def _extract_text(response: Any) -> str:
+    content = getattr(response, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(response, str):
+        return response
+    return str(response)
+
+
+def _parse_json(text: str) -> dict[str, Any]:
+    text = text.strip()
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return {}
+        try:
+            data = json.loads(text[start : end + 1])
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+

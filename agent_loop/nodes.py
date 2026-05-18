@@ -1,60 +1,102 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from langchain_core.messages import BaseMessage
-from langchain_core.runnables import Runnable
-from langchain_core.tools import BaseTool
-from langgraph.graph import StateGraph
-from langgraph.prebuilt import ToolNode
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import Runnable, RunnableLambda
 
 from tools.registry import ToolRegistry
 
-try:
-    from .router import get_routing_node as _get_routing_node
-    from .memory import get_memory_node as _get_memory_node
-except Exception:
-    _get_routing_node = None
-    _get_memory_node = None
+from .model_factory import build_chat_model
+from .memory import get_md_memory_node
+from .rag_memory import get_rag_memory_node
+from .router import get_routing_node
 
 
 class AgentNodes:
-    """LangGraph 节点导入和管理类"""
-
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self.tool_registry = ToolRegistry(config.get("tools", {}).get("enabled"))
-        self._nodes: dict[str, Runnable] = {}
+        self.chat_model = build_chat_model(config).bind_tools(self.tool_registry.tools())
 
-    def get_tool_node(self) -> ToolNode:
-        """获取工具节点"""
-        return self.tool_registry.to_tool_node()
+    def get_tool_node(self) -> Runnable:
+        return RunnableLambda(self._run_tools)
 
-    def get_agent_node(self, model: Runnable) -> Runnable:
-        """获取 Agent 节点"""
+    def get_agent_model_node(self) -> Runnable:
+        return RunnableLambda(self._run_agent_model)
 
-        return model
+    def get_rag_retrieval_memory_node(self) -> Runnable:
+        return get_rag_memory_node(self.config)
 
-    def get_memory_node(self) -> Runnable:
-        """获取记忆节点"""
-        if _get_memory_node is None:
-            raise RuntimeError("memory node implementation not available")
-        return _get_memory_node(self.config)
+    def get_md_memory_node(self) -> Runnable:
+        return get_md_memory_node(self.config)
 
-    def get_routing_node(self) -> Runnable:
-        """获取路由节点"""
-        if _get_routing_node is None:
-            raise RuntimeError("routing node implementation not available")
-        return _get_routing_node(self.config)
+    def get_router_node(self) -> Runnable:
+        return get_routing_node(self.config)
 
-    def register_node(self, name: str, node: Runnable) -> None:
-        """注册自定义节点"""
-        self._nodes[name] = node
+    def _run_agent_model(self, state: dict[str, Any]) -> dict[str, Any]:
+        messages = list(state.get("messages", []))
+        user_input = str(state.get("user_input", "") or "")
+        if not messages:
+            messages.append(SystemMessage(content=self._build_system_message(state)))
+            messages.append(HumanMessage(content=user_input))
+        response = self.chat_model.invoke(messages)
+        messages.append(response)
+        state["messages"] = messages
+        state["assistant_output"] = self._extract_text(response)
+        return state
 
-    def get_node(self, name: str) -> Runnable:
-        """获取已注册的节点"""
-        return self._nodes[name]
+    def _run_tools(self, state: dict[str, Any]) -> dict[str, Any]:
+        messages = list(state.get("messages", []))
+        if not messages or not isinstance(messages[-1], AIMessage):
+            state["messages"] = messages
+            return state
+        tool_calls = messages[-1].tool_calls or []
+        for call in tool_calls:
+            name = str(call.get("name", ""))
+            args = call.get("args", {})
+            call_id = str(call.get("id", ""))
+            if not isinstance(args, dict):
+                args = {}
+            try:
+                result = self.tool_registry.run(name, args)
+            except Exception as exc:
+                result = {"error": str(exc), "tool": name}
+            messages.append(
+                ToolMessage(
+                    content=json.dumps(result, ensure_ascii=False),
+                    tool_call_id=call_id,
+                )
+            )
+        state["messages"] = messages
+        return state
 
-    def list_nodes(self) -> list[str]:
-        """列出所有可用节点"""
-        return list(self._nodes.keys())
+    def _build_system_message(self, state: dict[str, Any]) -> str:
+        memory = state.get("memory", {})
+        md_map = memory.get("markdown", {})
+        rag_items = memory.get("rag", [])
+        md_text = "\n\n".join(str(v) for v in md_map.values()) if md_map else "No markdown memory loaded."
+        rag_text = "\n".join(str(v) for v in rag_items) if rag_items else "No RAG memory loaded."
+        return "\n".join(
+            [
+                f"You are {self.config['agent']['name']}.",
+                self.config["agent"].get("description", ""),
+                "",
+                "Long-term markdown memory:",
+                md_text,
+                "",
+                "RAG memory:",
+                rag_text,
+                "",
+                "Available tools:",
+                ", ".join(self.tool_registry.names()) if self.tool_registry.names() else "No tools enabled.",
+            ]
+        )
+
+    @staticmethod
+    def _extract_text(response: Any) -> str:
+        content = getattr(response, "content", "")
+        if isinstance(content, str):
+            return content
+        return str(content)

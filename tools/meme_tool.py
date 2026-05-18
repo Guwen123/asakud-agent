@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langchain_core.tools import tool
 
-from meme import get_meme_for_text, save_meme_image
+from tools.meme import get_meme_for_text, save_meme_image
 
 
 @tool

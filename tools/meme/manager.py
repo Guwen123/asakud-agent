@@ -4,10 +4,9 @@ import json
 import shutil
 from pathlib import Path
 from random import choice
-from typing import Any
 
 MEME_DIR = Path(__file__).resolve().parent
-MEME_IMAGE_DIR = MEME_DIR / "meme"
+MEME_IMAGE_DIR = MEME_DIR / "images"
 MEME_METADATA_PATH = MEME_DIR / "memes.json"
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
@@ -21,22 +20,22 @@ def load_memes() -> dict[str, dict[str, str]]:
     if not MEME_METADATA_PATH.exists():
         return {}
     try:
-        return json.loads(MEME_METADATA_PATH.read_text(encoding="utf-8"))
+        data = json.loads(MEME_METADATA_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def write_memes(memes: dict[str, dict[str, str]]) -> None:
     ensure_dirs()
     MEME_METADATA_PATH.write_text(
-        json.dumps(memes, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(memes, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
-    
+
 
 def normalize_name(name: str) -> str:
-    normalized = "".join(
-        ch.lower() if ch.isalnum() else "_" for ch in name.strip()
-    )
+    normalized = "".join(ch.lower() if ch.isalnum() else "_" for ch in name.strip())
     normalized = "_".join(part for part in normalized.split("_") if part)
     return normalized or "meme"
 
@@ -75,8 +74,8 @@ def save_meme_image(
     meme_name = normalize_name(dest_name)
     meme_entry: dict[str, str] = {
         "name": meme_name,
-        "path": f"meme/meme/{filename}",
-        "description": description or f"表情包文件 {filename}",
+        "path": str(destination.resolve()),
+        "description": description or f"Meme image file {filename}",
         "trigger": trigger,
     }
     if category:
@@ -93,8 +92,8 @@ def get_meme_for_text(text: str, category: str | None = None) -> dict[str, str]:
     if not memes:
         return {
             "name": "default",
-            "path": "meme/default.png",
-            "description": "默认表情包，尚未配置 meme 数据。",
+            "path": "",
+            "description": "No meme data configured.",
         }
 
     lowered = text.lower()
@@ -104,8 +103,9 @@ def get_meme_for_text(text: str, category: str | None = None) -> dict[str, str]:
                 return meme
 
     for meme in memes.values():
-        trigger = meme.get("trigger", "")
-        if trigger and trigger.lower() in lowered:
+        trigger = (meme.get("trigger") or "").lower()
+        if trigger and trigger in lowered:
             return meme
 
     return choice(list(memes.values()))
+
