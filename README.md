@@ -61,7 +61,6 @@ agent.config.md
 - `rag/`: RAG retrieval package split into schemas, offline index building, retrieval, routing, and utils.
 - `main.py`: FastAPI service entrypoint for running the agent continuously.
 - `tools/`: tool registry and built-in tools available to the agent.
-- `http_client/`: async HTTP helpers and OpenAI-compatible model client.
 
 ## RAG
 

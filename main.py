@@ -10,7 +10,6 @@ from agent_loop.bootstrap import bootstrap
 from agent_loop.config_loader import load_config
 from agent_loop.loop import run_agent_once_async
 from agent_loop.scheduler import MarkdownTaskScheduler
-from http_client import AsyncHttpClient
 
 
 class ChatRequest(BaseModel):
@@ -35,8 +34,6 @@ async def scheduled_task_loop(app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     bootstrap()
     app.state.config = load_config()
-    app.state.http_client = AsyncHttpClient()
-    await app.state.http_client.start()
     app.state.scheduler = MarkdownTaskScheduler(
         app.state.config,
         execute_task=_execute_scheduled_task,
@@ -48,7 +45,6 @@ async def lifespan(app: FastAPI):
         app.state.scheduler_task.cancel()
         with suppress(asyncio.CancelledError):
             await app.state.scheduler_task
-        await app.state.http_client.aclose()
 
 
 app = FastAPI(

@@ -17,7 +17,7 @@ from .router import get_routing_node
 class AgentNodes:
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
-        self.tool_registry = ToolRegistry(config.get("tools", {}).get("enabled"))
+        self.tool_registry = ToolRegistry(config.get("tools", {}).get("enabled"), config=config)
         self.chat_model = build_chat_model(config).bind_tools(self.tool_registry.tools())
 
     def get_tool_node(self) -> Runnable:
