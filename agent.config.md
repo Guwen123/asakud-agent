@@ -1,12 +1,12 @@
-# Sakuro Agent 配置
+# Sakuro Agent Config
 
-程序会读取下面 `json` 代码块作为唯一配置源。
+The program reads the fenced `json` block below as its runtime configuration.
 
 ```json
 {
   "agent": {
     "name": "sakuro-agent",
-    "description": "本地运行的长期记忆 Agent。",
+    "description": "Local long-running memory agent.",
     "language": "zh-CN",
     "timezone": "Asia/Shanghai"
   },
@@ -16,30 +16,89 @@
     "reload": false,
     "scheduler_interval_seconds": 30
   },
+  "napcat": {
+    "enabled": true,
+    "http_url": "http://127.0.0.1:3000",
+    "token": "bppgWJ0-EeTzhOzg",
+    "callback_path": "/getMessage",
+    "reply_path": "/sendMessage",
+    "report_format": "string"
+  },
   "model": {
     "provider": "token-plan-cn",
     "protocol": "openai-compatible",
     "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "",
-    "name": "MiMo-V2.5-Pro",
+    "api_key": "tp-",
+    "name": "mimo-v2.5-pro",
     "temperature": 0.2,
     "max_output_tokens": 4096,
     "available_models": [
-      {"name": "MiMo-V2.5-Pro", "type": "chat", "description": "默认主模型"},
-      {"name": "MiMo-V2.5", "type": "chat", "description": "通用对话模型"},
-      {"name": "MiMo-V2-Pro", "type": "chat", "description": "备选高性能模型"},
-      {"name": "MiMo-V2-Omni", "type": "omni", "description": "多模态模型"},
-      {"name": "MiMo-V2.5-TTS", "type": "tts", "description": "TTS"},
-      {"name": "MiMo-V2.5-TTS-VoiceClone", "type": "tts", "description": "语音克隆 TTS"},
-      {"name": "MiMo-V2.5-TTS-VoiceDesign", "type": "tts", "description": "语音设计 TTS"},
-      {"name": "MiMo-V2-TTS", "type": "tts", "description": "旧版 TTS"}
+      {
+        "name": "mimo-v2.5-pro",
+        "type": "chat",
+        "description": "Default chat model."
+      },
+      {
+        "name": "mimo-v2.5",
+        "type": "chat",
+        "description": "General-purpose chat model."
+      },
+      {
+        "name": "mimo-v2-pro",
+        "type": "chat",
+        "description": "Alternate high-performance chat model."
+      },
+      {
+        "name": "mimo-v2-omni",
+        "type": "omni",
+        "description": "Multimodal model."
+      },
+      {
+        "name": "mimo-v2.5-tts",
+        "type": "tts",
+        "description": "Text-to-speech model."
+      },
+      {
+        "name": "mimo-v2.5-tts-voiceclone",
+        "type": "tts",
+        "description": "Voice-clone TTS model."
+      },
+      {
+        "name": "mimo-v2.5-tts-voicedesign",
+        "type": "tts",
+        "description": "Voice-design TTS model."
+      },
+      {
+        "name": "mimo-v2-tts",
+        "type": "tts",
+        "description": "Legacy TTS model."
+      }
     ]
+  },
+  "route_model": {
+    "provider": "token-plan-cn",
+    "protocol": "openai-compatible",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "api_key": "tp-cz1ic9i3klox7dtpmjortmi5tb1uutc2h29orx27efpf8a32",
+    "name": "mimo-v2-pro",
+    "temperature": 0.0,
+    "max_output_tokens": 512
+  },
+  "multimodal_model": {
+    "provider": "token-plan-cn",
+    "protocol": "openai-compatible",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "api_key": "tp-cz1ic9i3klox7dtpmjortmi5tb1uutc2h29orx27efpf8a32",
+    "name": "mimo-v2-omni",
+    "temperature": 0.0,
+    "max_output_tokens": 1024
   },
   "paths": {
     "memory_dir": "memory",
     "db_dir": "db",
     "skills_dir": "skills",
     "tools_dir": "tools",
+    "meme_dir": "meme",
     "database": "db/session_memory.db",
     "schema": "db/session_memory.schema.sql",
     "rag_memory_file": "rag/data/long_term_memory.jsonl"
@@ -55,36 +114,66 @@
       {
         "id": "user",
         "path": "memory/USER.md",
-        "title": "用户记忆",
-        "purpose": "用户长期画像与偏好。",
-        "sections": ["偏好", "协作方式", "边界", "禁止记录"]
+        "title": "User Memory",
+        "purpose": "Long-term user preferences and collaboration notes.",
+        "sections": [
+          "Preferences",
+          "Collaboration",
+          "Boundaries",
+          "Do Not Record"
+        ]
       },
       {
         "id": "project",
         "path": "memory/MEMORY.md",
-        "title": "项目记忆",
-        "purpose": "长期可复用的经验与习惯。",
-        "sections": ["项目事实", "环境", "长期说明", "已知修复"]
+        "title": "Project Memory",
+        "purpose": "Reusable long-term project knowledge.",
+        "sections": [
+          "Project Facts",
+          "Environment",
+          "Long Term Notes",
+          "Known Fixes"
+        ]
       },
       {
         "id": "self",
         "path": "memory/SELF.md",
-        "title": "自我认知",
-        "purpose": "Agent 对自身能力和工作方式的更新。",
-        "sections": ["能力边界", "工作方式", "改进计划"]
+        "title": "Self Memory",
+        "purpose": "Long-term updates about how the agent should work.",
+        "sections": [
+          "Capability Boundaries",
+          "Working Style",
+          "Improvement Plan"
+        ]
       },
       {
         "id": "scheduled",
         "path": "memory/SCHEDULED_TASKS.md",
-        "title": "定时任务",
-        "purpose": "可读的定时任务视图。",
-        "sections": ["进行中", "已完成", "已取消"]
+        "title": "Scheduled Tasks",
+        "purpose": "Readable scheduled task list.",
+        "sections": [
+          "Active",
+          "Completed",
+          "Cancelled"
+        ]
       }
     ],
     "sqlite": {
-      "enabled_tables": ["sessions", "messages", "memory_events", "scheduled_tasks", "skill_runs"],
+      "enabled_tables": [
+        "sessions",
+        "messages",
+        "memory_events",
+        "scheduled_tasks",
+        "skill_runs"
+      ],
       "enable_message_fts": true
     }
+  },
+  "meme": {
+    "metadata_path": "meme/memes.json",
+    "image_dir": "meme/data",
+    "auto_collect_probability": 0.35,
+    "send_probability": 0.25
   },
   "loop": {
     "max_steps": 30,
@@ -101,20 +190,23 @@
   "tools": {
     "directory": "tools",
     "auto_load": true,
-    "enabled": ["echo", "time_now"]
+    "enabled": [
+      "echo",
+      "time_now"
+    ]
   },
   "skills": [
     {
       "id": "scheduled-memory",
       "path": "skills/scheduled-memory/SKILL.md",
-      "title": "定时记忆",
-      "purpose": "把未来提醒转成结构化任务。"
+      "title": "Scheduled Memory",
+      "purpose": "Turn future reminders into structured scheduled tasks."
     },
     {
       "id": "example",
       "path": "skills/example/SKILL.md",
-      "title": "示例 Skill",
-      "purpose": "Skill 最小模板。"
+      "title": "Example Skill",
+      "purpose": "Minimal example skill."
     }
   ]
 }

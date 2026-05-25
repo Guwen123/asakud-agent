@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from langchain_core.runnables import Runnable, RunnableLambda
+from langchain_core.runnables import Runnable
 
 from rag.offline.search_index import RagSearchIndex
 from rag.retrieval.hybrid import hybrid_rerank_retrieve
@@ -36,19 +36,3 @@ def routed_retrieve(
             final_limit=final_limit,
         )
     return RoutedRetrievalResult(route=route, results=results)
-
-
-def build_routed_retriever_runnable(
-    index: RagSearchIndex,
-    route_llm: Runnable,
-    cross_encoder_scorer: CrossEncoderScorer | None = None,
-) -> RunnableLambda:
-    return RunnableLambda(
-        lambda query: routed_retrieve(
-            query=query,
-            index=index,
-            route_llm=route_llm,
-            cross_encoder_scorer=cross_encoder_scorer,
-        )
-    )
-

@@ -6,18 +6,6 @@ from typing import Any
 from agent_loop.config_loader import project_path
 
 
-def list_markdown_memories(config: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        {
-            "id": item.get("id"),
-            "path": str(project_path(item["path"])),
-            "title": item.get("title", ""),
-            "sections": item.get("sections", []),
-        }
-        for item in config.get("memory", {}).get("markdown_files", [])
-    ]
-
-
 def add_markdown_memory(
     memory_id: str,
     content: str,
@@ -76,4 +64,3 @@ def _append_to_section(markdown: str, section: str, entry: str) -> str:
         lines.append("")
     lines.extend([heading, "", entry, ""])
     return "\n".join(lines).rstrip() + "\n"
-

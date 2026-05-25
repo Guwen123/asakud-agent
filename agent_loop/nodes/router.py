@@ -6,35 +6,21 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable, RunnableLambda
 
-from .config_loader import load_config
-from .model_factory import build_chat_model
+from agent_loop.models.factory import build_route_model
+from agent_loop.prompts import WORKFLOW_ROUTER_PROMPT
 
-
-ROUTER_PROMPT = (
-    "You are a workflow router. Return JSON only.\n"
-    "Fields:\n"
-    "- read_md: true/false\n"
-    "- read_rag: true/false\n"
-    "- use_tool: true/false\n"
-    "- read_md_after_tool: true/false\n"
-    "- rag_mode: direct or hybrid_rerank\n"
-    "- plan: short text\n"
-)
+from ..config_loader import load_config
 
 
 def get_routing_node(config: dict | None = None) -> Runnable:
     cfg = config or load_config()
-    route_llm = build_chat_model(cfg, model_key="route_model")
+    route_llm = build_route_model(cfg, overrides={"temperature": 0.0, "max_output_tokens": 300})
 
     def _run(state: dict[str, Any]) -> dict[str, Any]:
-        messages = state.get("messages", [])
-        content = ""
-        if messages:
-            content = str(getattr(messages[-1], "content", "") or "")
-
+        content = str(state.get("user_input", "") or "")
         response = route_llm.invoke(
             [
-                SystemMessage(content=ROUTER_PROMPT),
+                SystemMessage(content=WORKFLOW_ROUTER_PROMPT),
                 HumanMessage(content=json.dumps({"content": content}, ensure_ascii=False)),
             ]
         )
@@ -61,27 +47,24 @@ def _parse_router_payload(text: str) -> dict[str, Any]:
 
 
 def _extract_text(response: Any) -> str:
-    content = getattr(response, "content", None)
+    content = getattr(response, "content", "")
     if isinstance(content, str):
         return content
-    if isinstance(response, str):
-        return response
-    return str(response)
+    return str(content)
 
 
 def _parse_json(text: str) -> dict[str, Any]:
-    text = text.strip()
+    raw = text.strip()
     try:
-        data = json.loads(text)
+        data = json.loads(raw)
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
+        start = raw.find("{")
+        end = raw.rfind("}")
         if start == -1 or end == -1 or end <= start:
             return {}
         try:
-            data = json.loads(text[start : end + 1])
+            data = json.loads(raw[start : end + 1])
             return data if isinstance(data, dict) else {}
         except json.JSONDecodeError:
             return {}
-

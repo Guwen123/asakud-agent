@@ -16,7 +16,6 @@ def build_chat_model(
     merged = dict(model_config)
     if overrides:
         merged.update(overrides)
-
     return ChatOpenAI(
         model=merged["name"],
         api_key=merged["api_key"],
@@ -24,3 +23,11 @@ def build_chat_model(
         temperature=merged.get("temperature", 0.2),
         max_tokens=merged.get("max_output_tokens"),
     )
+
+
+def build_route_model(config: dict[str, Any], overrides: dict[str, Any] | None = None) -> ChatOpenAI:
+    return build_chat_model(config, model_key="route_model", overrides=overrides)
+
+
+def build_multimodal_model(config: dict[str, Any], overrides: dict[str, Any] | None = None) -> ChatOpenAI:
+    return build_chat_model(config, model_key="multimodal_model", overrides=overrides)

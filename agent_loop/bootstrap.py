@@ -190,6 +190,25 @@ def build_schema(config: dict[str, Any]) -> str:
     return "\n".join(parts).strip() + "\n"
 
 
+def bootstrap_meme_storage(config: dict[str, Any]) -> list[str]:
+    paths_config = config.get("paths", {})
+    meme_config = config.get("meme", {})
+    meme_dir = project_path(paths_config.get("meme_dir", "meme"))
+
+    metadata_value = meme_config.get("metadata_path")
+    image_dir_value = meme_config.get("image_dir")
+
+    metadata_path = project_path(metadata_value) if metadata_value else meme_dir / "memes.json"
+    image_dir = project_path(image_dir_value) if image_dir_value else meme_dir / "data"
+
+    created: list[str] = []
+    image_dir.mkdir(parents=True, exist_ok=True)
+    created.append(str(image_dir))
+    if write_if_missing(metadata_path, "{}\n"):
+        created.append(str(metadata_path))
+    return created
+
+
 def bootstrap(config_path: str | Path = "agent.config.md") -> list[str]:
     config = load_config(config_path)
     created: list[str] = []
@@ -219,6 +238,8 @@ def bootstrap(config_path: str | Path = "agent.config.md") -> list[str]:
         path = project_path(skill["path"])
         if write_if_missing(path, render_skill(skill)):
             created.append(str(path))
+
+    created.extend(bootstrap_meme_storage(config))
 
     return created
 

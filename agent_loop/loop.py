@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
+import json
 import sys
 from pathlib import Path
 
@@ -22,11 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-def now_iso() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat()
-
-
-async def run_agent_once_async(user_input: str) -> str:
+async def run_agent_once_async(user_input: str) -> dict[str, str]:
     bootstrap()
     config = load_config()
     workflow = AgentWorkflow(config)
@@ -43,13 +39,16 @@ async def run_agent_once_async(user_input: str) -> str:
         "rag_index": None,
     }
     result = await asyncio.to_thread(app.invoke, state)
-    return str(result.get("assistant_output", "") or "")
+    return {
+        "message": str(result.get("final_output", result.get("assistant_output", "")) or ""),
+        "image_ref": str(result.get("final_meme_image_ref", "") or ""),
+    }
 
 
-def run_agent_once(user_input: str) -> str:
+def run_agent_once(user_input: str) -> dict[str, str]:
     return asyncio.run(run_agent_once_async(user_input))
 
 
 if __name__ == "__main__":
     text = input("User> ")
-    print(run_agent_once(text))
+    print(json.dumps(run_agent_once(text), ensure_ascii=False))

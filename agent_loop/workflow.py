@@ -11,8 +11,9 @@ from db.runtime import RuntimeStore
 from memory.markdown import add_markdown_memory
 
 from .config_loader import load_config, project_path
-from .model_factory import build_chat_model
-from .nodes import AgentNodes
+from .models.factory import build_chat_model
+from .nodes.core import AgentNodes
+from .prompts import LONG_TERM_MEMORY_PROMPT, SHORT_TERM_SUMMARY_PROMPT
 
 
 class AgentWorkflow:
@@ -30,12 +31,15 @@ class AgentWorkflow:
             routing: dict[str, Any]
             rag_index: Any
             assistant_output: str
+            final_output: str
+            final_meme_image_ref: str
             db_snapshot: dict[str, Any]
 
         workflow = StateGraph(WorkflowState)
-
         workflow.add_node("import_db", RunnableLambda(self._import_db_state))
+        workflow.add_node("router_meme", self.nodes.get_router_meme_node())
         workflow.add_node("router", self.nodes.get_router_node())
+        workflow.add_node("skills", self.nodes.get_skill_node())
         workflow.add_node("md_memory", self.nodes.get_md_memory_node())
         workflow.add_node("rag_memory", self.nodes.get_rag_retrieval_memory_node())
         workflow.add_node("agent_model", self.nodes.get_agent_model_node())
@@ -43,21 +47,21 @@ class AgentWorkflow:
         workflow.add_node("save_long_term", RunnableLambda(self._save_long_term_memory))
         workflow.add_node("trim_short_term", RunnableLambda(self._trim_short_term_memory))
         workflow.add_node("export_db", RunnableLambda(self._export_db_state))
+        workflow.add_node("print_meme", self.nodes.get_print_meme_node())
 
         workflow.add_edge(START, "import_db")
-        workflow.add_edge("import_db", "router")
-        workflow.add_edge("router", "md_memory")
+        workflow.add_edge("import_db", "router_meme")
+        workflow.add_edge("router_meme", "router")
+        workflow.add_edge("router", "skills")
+        workflow.add_edge("skills", "md_memory")
         workflow.add_edge("md_memory", "rag_memory")
         workflow.add_edge("rag_memory", "agent_model")
-        workflow.add_conditional_edges(
-            "agent_model", 
-            self._has_tool_calls, 
-            {"tools": "tools", "done": "save_long_term"}
-            )
+        workflow.add_conditional_edges("agent_model", self._has_tool_calls, {"tools": "tools", "done": "save_long_term"})
         workflow.add_edge("tools", "agent_model")
         workflow.add_edge("save_long_term", "trim_short_term")
         workflow.add_edge("trim_short_term", "export_db")
-        workflow.add_edge("export_db", END)
+        workflow.add_edge("export_db", "print_meme")
+        workflow.add_edge("print_meme", END)
 
         self.graph = workflow
         return workflow
@@ -76,8 +80,8 @@ class AgentWorkflow:
     def _import_db_state(self, state: dict[str, Any]) -> dict[str, Any]:
         store = self._new_store()
         store.initialize()
-
         session_id = str(state.get("session_id", "") or "")
+        messages = list(state.get("messages", []))
         if session_id:
             records = store.get_messages(session_id=session_id, limit=20)
             if records:
@@ -88,18 +92,18 @@ class AgentWorkflow:
                     elif item.role == "assistant":
                         imported.append(AIMessage(content=item.content))
                 if imported:
-                    state["messages"] = imported
-
-        state["db_snapshot"] = {
-            "sessions": [record.id for record in store.list_sessions(limit=5)],
-        }
+                    messages = imported
+        user_input = str(state.get("user_input", "") or "")
+        if user_input and (not messages or not isinstance(messages[-1], HumanMessage) or messages[-1].content != user_input):
+            messages.append(HumanMessage(content=user_input))
+        state["messages"] = messages
+        state["db_snapshot"] = {"sessions": [record.id for record in store.list_sessions(limit=5)]}
         store.close()
         return state
 
     def _export_db_state(self, state: dict[str, Any]) -> dict[str, Any]:
         store = self._new_store()
         store.initialize()
-
         session_id = str(state.get("session_id", "") or "")
         if session_id:
             store.create_session(session_id=session_id, title="workflow session")
@@ -118,12 +122,17 @@ class AgentWorkflow:
         if not user_input or not assistant_output:
             return state
         model = build_chat_model(self.config, overrides={"temperature": 0.0, "max_output_tokens": 800})
-        prompt = (
-            "你是记忆路由器。根据这轮对话抽取长期记忆，返回 JSON："
-            '{"save_to_rag":bool,"memory_habit":"","self_update":""}。'
-            "不需要保存就留空字符串。memory_habit写入MEMORY.md，self_update写入SELF.md。"
+        response = model.invoke(
+            [
+                SystemMessage(content=LONG_TERM_MEMORY_PROMPT),
+                HumanMessage(
+                    content=json.dumps(
+                        {"user": user_input, "assistant": assistant_output},
+                        ensure_ascii=False,
+                    )
+                ),
+            ]
         )
-        response = model.invoke([SystemMessage(content=prompt), HumanMessage(content=json.dumps({"user": user_input, "assistant": assistant_output}, ensure_ascii=False))])
         decision = self._parse_json_response(self._extract_text(response))
         memory_habit = str(decision.get("memory_habit", "") or "").strip()
         self_update = str(decision.get("self_update", "") or "").strip()
@@ -131,13 +140,32 @@ class AgentWorkflow:
         if save_to_rag and (memory_habit or self_update):
             rag_path = project_path(self.config["paths"].get("rag_memory_file", "rag/data/long_term_memory.jsonl"))
             rag_path.parent.mkdir(parents=True, exist_ok=True)
-            row = {"user": user_input, "assistant": assistant_output, "memory_habit": memory_habit, "self_update": self_update}
-            with rag_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            row = {
+                "user": user_input,
+                "assistant": assistant_output,
+                "memory_habit": memory_habit,
+                "self_update": self_update,
+            }
+            with rag_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         if memory_habit:
-            add_markdown_memory("project", memory_habit, section="长期说明", reason="session_memory_route", source="memory_router", config=self.config)
+            add_markdown_memory(
+                "project",
+                memory_habit,
+                section="长期说明",
+                reason="session_memory_route",
+                source="memory_router",
+                config=self.config,
+            )
         if self_update:
-            add_markdown_memory("self", self_update, section="工作方式", reason="session_self_reflection", source="memory_router", config=self.config)
+            add_markdown_memory(
+                "self",
+                self_update,
+                section="工作方式",
+                reason="session_self_reflection",
+                source="memory_router",
+                config=self.config,
+            )
         return state
 
     def _trim_short_term_memory(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -155,12 +183,17 @@ class AgentWorkflow:
             return state
         old_records = records[:-keep_recent]
         recent_records = records[-keep_recent:]
-        old_texts = [f"{r.role}: {r.content}" for r in old_records if r.role != "system"]
+        old_texts = [f"{item.role}: {item.content}" for item in old_records if item.role != "system"]
         if not old_texts:
             store.close()
             return state
         model = build_chat_model(self.config, overrides={"temperature": 0.0, "max_output_tokens": 600})
-        summary_resp = model.invoke([SystemMessage(content="请总结以下历史消息，保留事实、偏好、未完成事项。输出简短中文摘要。"), HumanMessage(content="\n".join(old_texts))])
+        summary_resp = model.invoke(
+            [
+                SystemMessage(content=SHORT_TERM_SUMMARY_PROMPT),
+                HumanMessage(content="\n".join(old_texts)),
+            ]
+        )
         summary = self._extract_text(summary_resp)
         store.conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         store.conn.commit()
@@ -174,10 +207,7 @@ class AgentWorkflow:
         db_config = self.config.setdefault("db", {})
         db_config.setdefault("database", self.config["paths"]["database"])
         db_config.setdefault("schema", self.config["paths"]["schema"])
-        return RuntimeStore(
-            project_path(db_config["database"]),
-            project_path(db_config["schema"]),
-        )
+        return RuntimeStore(project_path(db_config["database"]), project_path(db_config["schema"]))
 
     @staticmethod
     def _extract_text(response: Any) -> str:

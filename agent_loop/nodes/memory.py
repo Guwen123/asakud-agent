@@ -6,24 +6,19 @@ from langchain_core.runnables import Runnable, RunnableLambda
 
 from memory.router import route_markdown_ids
 
-from .config_loader import load_config, project_path
-from .model_factory import build_chat_model
+from ..config_loader import load_config, project_path
+from ..models.factory import build_route_model
 
 
 def get_md_memory_node(config: dict | None = None) -> Runnable:
     cfg = config or load_config()
-    route_llm = build_chat_model(cfg, model_key="route_model")
+    route_llm = build_route_model(cfg, overrides={"temperature": 0.0, "max_output_tokens": 250})
 
     def _run(state: dict[str, Any]) -> dict[str, Any]:
-        messages = state.get("messages", [])
-        content = ""
-        if messages:
-            content = str(getattr(messages[-1], "content", "") or "")
-
         routing = state.get("routing", {})
         if not routing.get("read_md", False):
             return state
-
+        content = str(state.get("user_input", "") or "")
         selected_ids = route_markdown_ids(content=content, route_llm=route_llm, config=cfg)
         markdown_by_id = load_markdown_by_ids(cfg, selected_ids)
 
@@ -44,6 +39,5 @@ def load_markdown_by_ids(config: dict[str, Any], memory_ids: list[str]) -> dict[
             continue
         path = project_path(item["path"])
         if path.exists():
-            result[memory_id] = path.read_text(encoding="utf-8")
+            result[str(memory_id)] = path.read_text(encoding="utf-8")
     return result
-

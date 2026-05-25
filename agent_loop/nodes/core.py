@@ -3,15 +3,18 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import Runnable, RunnableLambda
 
 from tools.registry import ToolRegistry
 
-from .model_factory import build_chat_model
+from ..models.factory import build_chat_model
+from ..prompts import build_system_prompt
 from .memory import get_md_memory_node
-from .rag_memory import get_rag_memory_node
+from .meme import get_print_meme_node, get_router_meme_node
+from .rag import get_rag_memory_node
 from .router import get_routing_node
+from .skills import get_skill_memory_node
 
 
 class AgentNodes:
@@ -35,12 +38,19 @@ class AgentNodes:
     def get_router_node(self) -> Runnable:
         return get_routing_node(self.config)
 
+    def get_skill_node(self) -> Runnable:
+        return get_skill_memory_node(self.config)
+
+    def get_router_meme_node(self) -> Runnable:
+        return get_router_meme_node(self.config)
+
+    def get_print_meme_node(self) -> Runnable:
+        return get_print_meme_node(self.config)
+
     def _run_agent_model(self, state: dict[str, Any]) -> dict[str, Any]:
         messages = list(state.get("messages", []))
-        user_input = str(state.get("user_input", "") or "")
-        if not messages:
-            messages.append(SystemMessage(content=self._build_system_message(state)))
-            messages.append(HumanMessage(content=user_input))
+        if not messages or not isinstance(messages[0], SystemMessage):
+            messages.insert(0, SystemMessage(content=self._build_system_message(state)))
         response = self.chat_model.invoke(messages)
         messages.append(response)
         state["messages"] = messages
@@ -74,24 +84,13 @@ class AgentNodes:
 
     def _build_system_message(self, state: dict[str, Any]) -> str:
         memory = state.get("memory", {})
-        md_map = memory.get("markdown", {})
-        rag_items = memory.get("rag", [])
-        md_text = "\n\n".join(str(v) for v in md_map.values()) if md_map else "No markdown memory loaded."
-        rag_text = "\n".join(str(v) for v in rag_items) if rag_items else "No RAG memory loaded."
-        return "\n".join(
-            [
-                f"You are {self.config['agent']['name']}.",
-                self.config["agent"].get("description", ""),
-                "",
-                "Long-term markdown memory:",
-                md_text,
-                "",
-                "RAG memory:",
-                rag_text,
-                "",
-                "Available tools:",
-                ", ".join(self.tool_registry.names()) if self.tool_registry.names() else "No tools enabled.",
-            ]
+        return build_system_prompt(
+            config=self.config,
+            markdown_memory=memory.get("markdown", {}),
+            rag_items=memory.get("rag", []),
+            skill_texts=memory.get("skills", {}),
+            meme_context=memory.get("meme"),
+            tool_names=self.tool_registry.names(),
         )
 
     @staticmethod

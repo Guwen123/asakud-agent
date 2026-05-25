@@ -3,9 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.tools import BaseTool
-from langgraph.prebuilt import ToolNode
 
-from .base import build_tool_node
 from .builtin import BUILTIN_TOOLS
 from .mcp.factory import build_mcp_tools
 
@@ -28,15 +26,6 @@ class ToolRegistry:
 
     def tools(self) -> list[BaseTool]:
         return list(self._tools.values())
-
-    def to_tool_node(self) -> ToolNode:
-        return build_tool_node(self.tools())
-
-    def describe(self) -> list[dict[str, str]]:
-        return [
-            {"name": tool.name, "description": tool.description or ""}
-            for tool in self._tools.values()
-        ]
 
     def run(self, name: str, arguments: dict[str, Any]) -> Any:
         if name not in self._tools:
