@@ -124,6 +124,16 @@ END;
 """
 
 
+DEFAULT_SKILL_REGISTRY = """# Skill Registry
+
+```json
+{
+  "skills": []
+}
+```
+"""
+
+
 def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -144,30 +154,8 @@ def render_markdown_memory(item: dict[str, Any]) -> str:
         "",
     ]
     for section in item.get("sections", []):
-        lines.extend([f"## {section}", "", "- 暂无。", ""])
+        lines.extend([f"## {section}", "", "- Pending.", ""])
     return "\n".join(lines).rstrip() + "\n"
-
-
-def render_skill(item: dict[str, Any]) -> str:
-    return f"""# {item['title']}
-
-适用场景：{item.get('purpose', '未配置用途。')}
-
-## 输入
-
-- 在这里描述这个 Skill 需要的输入。
-
-## 工作流
-
-1. 判断这个 Skill 是否适用。
-2. 收集必要上下文。
-3. 执行可复用步骤。
-4. 验证结果。
-
-## 验证
-
-- 描述另一个 Agent 如何确认这个 Skill 已经正确执行。
-"""
 
 
 def build_schema(config: dict[str, Any]) -> str:
@@ -188,6 +176,14 @@ def build_schema(config: dict[str, Any]) -> str:
         parts.append(FTS_SQL)
 
     return "\n".join(parts).strip() + "\n"
+
+
+def bootstrap_skill_registry(config: dict[str, Any]) -> list[str]:
+    registry_path = project_path(config.get("paths", {}).get("skill_config_file", "skills/skill.config.md"))
+    created: list[str] = []
+    if write_if_missing(registry_path, DEFAULT_SKILL_REGISTRY):
+        created.append(str(registry_path))
+    return created
 
 
 def bootstrap_meme_storage(config: dict[str, Any]) -> list[str]:
@@ -234,13 +230,8 @@ def bootstrap(config_path: str | Path = "agent.config.md") -> list[str]:
         conn.executescript(schema_path.read_text(encoding="utf-8"))
     created.append(str(database_path))
 
-    for skill in config.get("skills", []):
-        path = project_path(skill["path"])
-        if write_if_missing(path, render_skill(skill)):
-            created.append(str(path))
-
+    created.extend(bootstrap_skill_registry(config))
     created.extend(bootstrap_meme_storage(config))
-
     return created
 
 

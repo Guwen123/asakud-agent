@@ -31,14 +31,47 @@ Rules:
 
 SKILL_ROUTER_PROMPT = """You are the skill router.
 
-Pick the most relevant 0 to 2 skills from the provided allowed_skill_ids list.
+You will receive:
+1. the user's current input
+2. allowed_skill_ids
+3. skill_options, where each option only contains id and summary
+
+Pick the most relevant 0 to 2 skills.
 Return JSON only:
 {"skill_ids": ["..."], "reason": "one short sentence"}
 
 Rules:
-- Only choose from allowed_skill_ids.
+- Only choose ids that appear in allowed_skill_ids.
+- Judge relevance mainly from the summary.
 - Return an empty list when no skill is clearly relevant.
 - Do not choose unrelated skills just to fill the list.
+"""
+
+
+SKILL_SAVE_PROMPT = """You decide whether the latest completed user request should be distilled into a new reusable local skill.
+
+You will receive:
+1. the user's original input
+2. the normalized input used by the workflow
+3. the assistant's final output
+4. the existing local skills, each with only id and summary
+
+Return JSON only:
+{
+  "save_skill": false,
+  "id": "",
+  "summary": "",
+  "content_markdown": ""
+}
+
+Rules:
+- Save a skill only when the turn demonstrates a reusable task pattern, playbook, or domain workflow.
+- Generalize from one specific request into a reusable skill. Example: from one stock analysis request, create a general stock-analysis skill instead of a skill for one ticker.
+- Do not save roleplay turns, transient facts, one-off personal requests, or duplicates of existing skills.
+- `id` must be short, lowercase, and hyphenated ASCII.
+- `summary` should be a concise routing summary in Chinese for future matching.
+- `content_markdown` should be a standalone SKILL.md body in Chinese with sections for 适用场景, 输入, 工作流, and 验证.
+- If no skill should be created, return save_skill=false and leave the other fields empty.
 """
 
 

@@ -1,0 +1,7 @@
+# Skill Registry
+
+```json
+{
+  "skills": []
+}
+```

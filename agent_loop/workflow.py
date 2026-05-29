@@ -26,6 +26,7 @@ class AgentWorkflow:
         class WorkflowState(dict):
             messages: list[BaseMessage]
             session_id: str
+            original_user_input: str
             user_input: str
             memory: dict[str, Any]
             routing: dict[str, Any]
@@ -39,7 +40,7 @@ class AgentWorkflow:
         workflow.add_node("import_db", RunnableLambda(self._import_db_state))
         workflow.add_node("router_meme", self.nodes.get_router_meme_node())
         workflow.add_node("router", self.nodes.get_router_node())
-        workflow.add_node("skills", self.nodes.get_skill_node())
+        workflow.add_node("skill_node", self.nodes.get_skill_node())
         workflow.add_node("md_memory", self.nodes.get_md_memory_node())
         workflow.add_node("rag_memory", self.nodes.get_rag_retrieval_memory_node())
         workflow.add_node("agent_model", self.nodes.get_agent_model_node())
@@ -47,20 +48,22 @@ class AgentWorkflow:
         workflow.add_node("save_long_term", RunnableLambda(self._save_long_term_memory))
         workflow.add_node("trim_short_term", RunnableLambda(self._trim_short_term_memory))
         workflow.add_node("export_db", RunnableLambda(self._export_db_state))
+        workflow.add_node("save_skill", self.nodes.get_save_skill_node())
         workflow.add_node("print_meme", self.nodes.get_print_meme_node())
 
         workflow.add_edge(START, "import_db")
         workflow.add_edge("import_db", "router_meme")
         workflow.add_edge("router_meme", "router")
-        workflow.add_edge("router", "skills")
-        workflow.add_edge("skills", "md_memory")
+        workflow.add_edge("router", "skill_node")
+        workflow.add_edge("skill_node", "md_memory")
         workflow.add_edge("md_memory", "rag_memory")
         workflow.add_edge("rag_memory", "agent_model")
         workflow.add_conditional_edges("agent_model", self._has_tool_calls, {"tools": "tools", "done": "save_long_term"})
         workflow.add_edge("tools", "agent_model")
         workflow.add_edge("save_long_term", "trim_short_term")
         workflow.add_edge("trim_short_term", "export_db")
-        workflow.add_edge("export_db", "print_meme")
+        workflow.add_edge("export_db", "save_skill")
+        workflow.add_edge("save_skill", "print_meme")
         workflow.add_edge("print_meme", END)
 
         self.graph = workflow
@@ -107,7 +110,7 @@ class AgentWorkflow:
         session_id = str(state.get("session_id", "") or "")
         if session_id:
             store.create_session(session_id=session_id, title="workflow session")
-            user_input = str(state.get("user_input", "") or "")
+            user_input = str(state.get("original_user_input", state.get("user_input", "")) or "")
             if user_input:
                 store.add_message(session_id=session_id, role="user", content=user_input)
             output = str(state.get("assistant_output", "") or "")

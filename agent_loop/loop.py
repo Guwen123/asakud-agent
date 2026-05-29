@@ -32,6 +32,7 @@ async def run_agent_once_async(user_input: str) -> dict[str, str]:
     session_id = config.get("db", {}).get("default_session_id", "default")
     state = {
         "session_id": session_id,
+        "original_user_input": user_input,
         "user_input": user_input,
         "messages": [HumanMessage(content=user_input)],
         "memory": {},

@@ -28,7 +28,7 @@ The program reads the fenced `json` block below as its runtime configuration.
     "provider": "token-plan-cn",
     "protocol": "openai-compatible",
     "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "tp-",
+    "api_key": "",
     "name": "mimo-v2.5-pro",
     "temperature": 0.2,
     "max_output_tokens": 4096,
@@ -97,6 +97,7 @@ The program reads the fenced `json` block below as its runtime configuration.
     "memory_dir": "memory",
     "db_dir": "db",
     "skills_dir": "skills",
+    "skill_config_file": "skills/skill.config.md",
     "tools_dir": "tools",
     "meme_dir": "meme",
     "database": "db/session_memory.db",
@@ -194,20 +195,6 @@ The program reads the fenced `json` block below as its runtime configuration.
       "echo",
       "time_now"
     ]
-  },
-  "skills": [
-    {
-      "id": "scheduled-memory",
-      "path": "skills/scheduled-memory/SKILL.md",
-      "title": "Scheduled Memory",
-      "purpose": "Turn future reminders into structured scheduled tasks."
-    },
-    {
-      "id": "example",
-      "path": "skills/example/SKILL.md",
-      "title": "Example Skill",
-      "purpose": "Minimal example skill."
-    }
-  ]
+  }
 }
 ```

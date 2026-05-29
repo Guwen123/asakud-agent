@@ -14,7 +14,7 @@ from .memory import get_md_memory_node
 from .meme import get_print_meme_node, get_router_meme_node
 from .rag import get_rag_memory_node
 from .router import get_routing_node
-from .skills import get_skill_memory_node
+from .skills import get_save_skill_node, get_skill_node
 
 
 class AgentNodes:
@@ -39,7 +39,10 @@ class AgentNodes:
         return get_routing_node(self.config)
 
     def get_skill_node(self) -> Runnable:
-        return get_skill_memory_node(self.config)
+        return get_skill_node(self.config)
+
+    def get_save_skill_node(self) -> Runnable:
+        return get_save_skill_node(self.config)
 
     def get_router_meme_node(self) -> Runnable:
         return get_router_meme_node(self.config)
