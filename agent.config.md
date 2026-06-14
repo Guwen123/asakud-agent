@@ -79,8 +79,8 @@ The program reads the fenced `json` block below as its runtime configuration.
     "provider": "token-plan-cn",
     "protocol": "openai-compatible",
     "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "tp-cz1ic9i3klox7dtpmjortmi5tb1uutc2h29orx27efpf8a32",
-    "name": "mimo-v2-pro",
+    "api_key": "",
+    "name": "mimo-v2.5",
     "temperature": 0.0,
     "max_output_tokens": 512
   },
@@ -88,7 +88,7 @@ The program reads the fenced `json` block below as its runtime configuration.
     "provider": "token-plan-cn",
     "protocol": "openai-compatible",
     "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "tp-cz1ic9i3klox7dtpmjortmi5tb1uutc2h29orx27efpf8a32",
+    "api_key": "",
     "name": "mimo-v2-omni",
     "temperature": 0.0,
     "max_output_tokens": 1024
