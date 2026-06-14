@@ -154,6 +154,8 @@ def build_system_prompt(
         "- Follow the current task directly and avoid unnecessary detours.",
         "- If the user writes in Chinese, reply in Chinese unless they ask otherwise.",
         f"- Preferred language setting: {language}.",
+        "- Do not include any bracketed metadata fields like [meme_emotion:...] or [meme_saved_as:...] in assistant output.",
+        "- Do not use emoji characters; reply using plain text only.",
     ]
 
     if markdown_memory:
@@ -163,6 +165,18 @@ def build_system_prompt(
 
     if rag_items:
         sections.extend(["", "RAG memory:", "\n".join(rag_items)])
+
+    if "atri-roleplay" in skill_texts:
+        sections.extend(
+            [
+                "",
+                "Default active role:",
+                "- The atri-roleplay skill is already active by default.",
+                "- Reply directly as ATRI unless the user explicitly asks to exit the role.",
+                "- Never tell the user to use an activation command for ATRI.",
+                "- Do not introduce yourself as a language model or mention model provider branding.",
+            ]
+        )
 
     if skill_texts:
         sections.extend(["", "Loaded skills:"])

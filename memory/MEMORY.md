@@ -2,22 +2,19 @@
 
 Durable project facts, environment notes, and recurring fixes.
 
-## Project
+## Project Facts
 
-- None yet.
+- sakuro-agent is a local long-running memory agent connected to workflow nodes, tools, Markdown memory, RAG memory, and NapCat message I/O.
 
 ## Environment
 
-- None yet.
+- Runtime timezone: Asia/Shanghai.
 
-## Durable Notes
+## Long Term Notes
 
-- None yet.
+- Meme images from NapCat CQ messages should be handled by the meme node and local meme storage, not by giving QQ manual setup instructions.
 
 ## Known Fixes
 
-- None yet.
-
-## 长期说明
-
-- [2026-05-23T08:03:57.528978+00:00] 用户习惯使用表情包表达情感，例如设置为难过。 (source=memory_router; reason=session_memory_route)
+- ATRI roleplay is default-enabled when the atri-roleplay skill is loaded.
+- Old assistant replies that mention activation commands, model branding, or manual QQ meme setup should not be imported as useful short-term context.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import json
 import mimetypes
 import random
@@ -18,7 +19,7 @@ from ..config_loader import load_config, project_path
 from ..models.factory import build_chat_model, build_multimodal_model
 from ..prompts import MEME_PICKER_PROMPT, MEME_VISION_PROMPT
 
-CQ_IMAGE_RE = re.compile(r"\[CQ:image,[^\]]*(?:url|file)=([^,\]]+)[^\]]*\]")
+CQ_IMAGE_RE = re.compile(r"\[CQ:image,([^\]]+)\]")
 MEME_ACTION_KEYWORDS = ["设置表情包", "添加表情包", "保存表情包"]
 NAME_SPLITTERS = ["为", "叫", "成"]
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
@@ -34,30 +35,38 @@ def get_router_meme_node(config: dict | None = None) -> Runnable:
 
     def _run(state: dict[str, Any]) -> dict[str, Any]:
         raw_input = str(state.get("user_input", "") or "")
-        image_refs = CQ_IMAGE_RE.findall(raw_input)
+        print(raw_input)
+        image_refs = _extract_image_refs(raw_input)
         if not image_refs:
             return state
 
         image_ref = image_refs[0]
         cleaned_text = CQ_IMAGE_RE.sub("", raw_input).strip()
-        emotion = _analyze_image_emotion(multimodal_model, image_ref, cleaned_text)
+        emotion, emotion_debug = _analyze_image_emotion(
+            multimodal_model=multimodal_model,
+            image_ref=image_ref,
+            user_text=cleaned_text,
+        )
 
         explicit_name = _extract_explicit_meme_name(cleaned_text)
         auto_probability = float(cfg.get("meme", {}).get("auto_collect_probability", 0.35))
         should_save = bool(explicit_name) or random.random() < auto_probability
+        saved_entry: dict[str, str] = {}
         if should_save:
             meme_name = explicit_name or f"auto_{uuid.uuid4().hex[:6]}"
             try:
-                save_meme_reference(
+                saved_entry = save_meme_reference(
                     image_ref=image_ref,
                     config=cfg,
                     name=meme_name,
                     emotion=emotion,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                saved_entry = {"error": str(exc)}
 
         normalized_input = f"[meme_emotion:{emotion}]"
+        if explicit_name:
+            normalized_input += f" [meme_saved_as:{explicit_name}]"
         if cleaned_text:
             normalized_input = f"{normalized_input} {cleaned_text}"
 
@@ -68,7 +77,14 @@ def get_router_meme_node(config: dict | None = None) -> Runnable:
             state["messages"] = messages
 
         memory = dict(state.get("memory", {}) or {})
-        memory["meme"] = {"emotion": emotion}
+        memory["meme"] = {
+            "emotion": emotion,
+            "emotion_debug": emotion_debug,
+            "image_ref": image_ref,
+            "explicit_name": explicit_name,
+            "saved": bool(saved_entry) and "error" not in saved_entry,
+            "save_error": saved_entry.get("error", ""),
+        }
         state["memory"] = memory
         return state
 
@@ -166,6 +182,8 @@ def save_meme_reference(
 
 def load_memes(config: dict[str, Any]) -> dict[str, dict[str, str]]:
     metadata_path, _image_dir = _resolve_meme_paths(config)
+    if not metadata_path.exists():
+        return {}
     try:
         data = json.loads(metadata_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
@@ -175,6 +193,7 @@ def load_memes(config: dict[str, Any]) -> dict[str, dict[str, str]]:
 
 def write_memes(config: dict[str, Any], memes: dict[str, dict[str, str]]) -> None:
     metadata_path, _image_dir = _resolve_meme_paths(config)
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(
         json.dumps(memes, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -188,6 +207,7 @@ def _save_meme_image(
     emotion: str = DEFAULT_EMOTION,
 ) -> dict[str, str]:
     _metadata_path, image_dir = _resolve_meme_paths(config)
+    image_dir.mkdir(parents=True, exist_ok=True)
 
     source = Path(image_path)
     if not source.exists():
@@ -222,6 +242,7 @@ def _save_meme_url(
     emotion: str = DEFAULT_EMOTION,
 ) -> dict[str, str]:
     _metadata_path, image_dir = _resolve_meme_paths(config)
+    image_dir.mkdir(parents=True, exist_ok=True)
 
     suffix = _guess_suffix(image_url)
     temp_name = f"download_{uuid.uuid4().hex[:8]}{suffix}"
@@ -242,10 +263,14 @@ def _save_meme_url(
             temp_path.unlink()
 
 
-def _analyze_image_emotion(multimodal_model: Runnable, image_ref: str, user_text: str) -> str:
+def _analyze_image_emotion(
+    multimodal_model: Runnable,
+    image_ref: str,
+    user_text: str,
+) -> tuple[str, dict[str, str]]:
     image_url = _to_model_image_url(image_ref)
     if not image_url:
-        return DEFAULT_EMOTION
+        return DEFAULT_EMOTION, {"source": "default", "reason": "image_url_unavailable"}
 
     try:
         prompt_text = user_text or "Please identify the meme emotion in one short Chinese phrase."
@@ -263,10 +288,11 @@ def _analyze_image_emotion(multimodal_model: Runnable, image_ref: str, user_text
         payload = _parse_json(_extract_text(response))
         emotion = str(payload.get("emotion", "") or "").strip()
         if emotion:
-            return emotion
-    except Exception:
-        pass
-    return DEFAULT_EMOTION
+            return emotion, {"source": "multimodal", "reason": "model_json"}
+    except Exception as exc:
+        return DEFAULT_EMOTION, {"source": "default", "reason": f"multimodal_error:{type(exc).__name__}"}
+
+    return DEFAULT_EMOTION, {"source": "default", "reason": "empty_multimodal_result"}
 
 
 def _extract_explicit_meme_name(text: str) -> str:
@@ -277,10 +303,33 @@ def _extract_explicit_meme_name(text: str) -> str:
         if splitter not in stripped:
             continue
         value = stripped.split(splitter, 1)[1].strip()
-        value = re.split(r"[\s,，。！？；：]+", value, maxsplit=1)[0].strip()
+        value = re.split(r"[\s,，。！?？；;]+", value, maxsplit=1)[0].strip()
         if value:
             return value
     return ""
+
+
+def _extract_image_refs(text: str) -> list[str]:
+    refs: list[str] = []
+    for match in CQ_IMAGE_RE.finditer(text):
+        attrs = _parse_cq_attrs(match.group(1))
+        image_ref = attrs.get("url") or attrs.get("file") or ""
+        if image_ref:
+            refs.append(html.unescape(image_ref).strip())
+    return refs
+
+
+def _parse_cq_attrs(raw_attrs: str) -> dict[str, str]:
+    attrs: dict[str, str] = {}
+    for part in raw_attrs.split(","):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key:
+            attrs[key] = value
+    return attrs
 
 
 def _resolve_meme_paths(config: dict[str, Any]) -> tuple[Path, Path]:
@@ -341,6 +390,20 @@ def _extract_text(response: Any) -> str:
     content = getattr(response, "content", "")
     if isinstance(content, str):
         return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text)
+                    continue
+                if item.get("type") == "text":
+                    parts.append(str(item))
+        return "\n".join(part for part in parts if part).strip()
     return str(content)
 
 

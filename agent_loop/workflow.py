@@ -90,6 +90,8 @@ class AgentWorkflow:
             if records:
                 imported: list[BaseMessage] = []
                 for item in records:
+                    if self._is_contaminated_history(item.role, item.content):
+                        continue
                     if item.role == "user":
                         imported.append(HumanMessage(content=item.content))
                     elif item.role == "assistant":
@@ -218,6 +220,23 @@ class AgentWorkflow:
         if isinstance(content, str):
             return content
         return str(content)
+
+    @staticmethod
+    def _is_contaminated_history(role: str, content: str) -> bool:
+        if role != "assistant":
+            return False
+        markers = [
+            "/ATRI_chat",
+            "MiMo-v2.5",
+            "小米大模型",
+            "语言模型",
+            "基础记忆代理",
+            "切换交互模式",
+            "无法直接帮你操作",
+            "在QQ中添加自定义表情包",
+            "手动设置",
+        ]
+        return any(marker in content for marker in markers)
 
     @staticmethod
     def _parse_json_response(text: str) -> dict[str, Any]:

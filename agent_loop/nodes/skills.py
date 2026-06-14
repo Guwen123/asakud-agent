@@ -292,6 +292,9 @@ def _load_skill_bundle(entry_path: Path) -> str:
 
 
 def _bundle_paths(root: Path, entry_path: Path) -> list[Path]:
+    if root.name == "atri-roleplay":
+        return [entry_path] if entry_path.exists() else []
+
     ordered: list[Path] = []
     seen: set[Path] = set()
 
@@ -317,7 +320,7 @@ def _builtin_atri_skill_entry(config: dict[str, Any]) -> dict[str, str] | None:
         return None
     return {
         "id": ATRI_SKILL_ID,
-        "summary": "内建 ATRI 角色技能，会在每次进入 skill_node 时自动加载。",
+        "summary": "内建 ATRI 角色技能，默认加载并要求助手直接以 ATRI 身份回应。",
         "path": ATRI_SKILL_PATH,
     }
 

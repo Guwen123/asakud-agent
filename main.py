@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
@@ -76,9 +77,9 @@ async def get_message(request: Request) -> dict[str, Any]:
     if _is_self_message(event):
         return {"ok": True, "ignored": True, "reason": "self_message"}
 
-    message_text = _extract_text(event.get("message"))
+    message_text = _extract_agent_message(event)
     if not message_text.strip():
-        return {"ok": True, "ignored": True}
+        return {"ok": True, "ignored": True, "reason": "not_addressed_to_agent"}
 
     target = _event_to_target(event)
     app.state.last_message_target = target
@@ -177,6 +178,73 @@ def _extract_text(message: Any) -> str:
                     chunks.append(f"[CQ:image,url={url}]")
         return "".join(chunks)
     return str(message or "")
+
+
+def _extract_agent_message(event: dict[str, Any]) -> str:
+    message_type = str(event.get("message_type", "private") or "private").lower()
+    message = event.get("message")
+
+    if message_type != "group":
+        return _extract_text(message)
+
+    self_id = _to_optional_int(event.get("self_id"))
+    if self_id is None:
+        return ""
+
+    if isinstance(message, list):
+        if not _has_at_segment(message, self_id):
+            return ""
+        return _strip_at_segments(_extract_text(_filter_non_at_segments(message, self_id)))
+
+    raw_text = _extract_text(message)
+    if not _contains_cq_at(raw_text, self_id):
+        return ""
+    return _strip_at_segments(raw_text, self_id=self_id)
+
+
+def _has_at_segment(message: list[Any], self_id: int) -> bool:
+    target = str(self_id)
+    for seg in message:
+        if not isinstance(seg, dict):
+            continue
+        if str(seg.get("type", "")).lower() != "at":
+            continue
+        data = seg.get("data", {})
+        if isinstance(data, dict) and str(data.get("qq", "")).strip() == target:
+            return True
+    return False
+
+
+def _filter_non_at_segments(message: list[Any], self_id: int) -> list[Any]:
+    target = str(self_id)
+    kept: list[Any] = []
+    for seg in message:
+        if not isinstance(seg, dict):
+            kept.append(seg)
+            continue
+        if str(seg.get("type", "")).lower() != "at":
+            kept.append(seg)
+            continue
+        data = seg.get("data", {})
+        qq = str(data.get("qq", "")).strip() if isinstance(data, dict) else ""
+        if qq != target:
+            kept.append(seg)
+    return kept
+
+
+def _contains_cq_at(text: str, self_id: int) -> bool:
+    pattern = re.compile(rf"\[CQ:at,qq={self_id}(?:,[^\]]*)?\]")
+    return bool(pattern.search(text))
+
+
+def _strip_at_segments(text: str, self_id: int | None = None) -> str:
+    value = str(text or "")
+    if self_id is None:
+        value = re.sub(r"\[CQ:at,qq=\d+(?:,[^\]]*)?\]", " ", value)
+    else:
+        value = re.sub(rf"\[CQ:at,qq={self_id}(?:,[^\]]*)?\]", " ", value)
+    value = re.sub(r"\s+", " ", value)
+    return value.strip()
 
 
 def _is_self_message(event: dict[str, Any]) -> bool:
