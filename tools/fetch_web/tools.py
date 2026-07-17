@@ -6,7 +6,7 @@ import threading
 from typing import Any
 from urllib.parse import quote_plus
 from playwright.sync_api import sync_playwright
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 
 _BROWSER_LOCK = threading.RLock()

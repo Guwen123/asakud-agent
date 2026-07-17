@@ -8,10 +8,12 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 
 try:
+    from .background import start_background_workers
     from .bootstrap import bootstrap
     from .config_loader import load_config
     from .workflow import AgentWorkflow
 except ImportError:
+    from background import start_background_workers
     from bootstrap import bootstrap
     from config_loader import load_config
     from workflow import AgentWorkflow
@@ -25,6 +27,7 @@ if str(ROOT) not in sys.path:
 async def run_agent_once_async(user_input: str) -> dict[str, str]:
     bootstrap()
     config = load_config()
+    start_background_workers(config)
     workflow = AgentWorkflow(config)
     workflow.build_workflow()
     app = workflow.compile()
@@ -37,7 +40,6 @@ async def run_agent_once_async(user_input: str) -> dict[str, str]:
         "messages": [HumanMessage(content=user_input)],
         "memory": {},
         "routing": {},
-        "rag_index": None,
     }
     result = await asyncio.to_thread(app.invoke, state)
     return {

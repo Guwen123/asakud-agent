@@ -86,13 +86,54 @@ class RuntimeStore:
         self.conn.commit()
         return message_id
 
+    def add_memory_event(
+        self,
+        memory_type: str,
+        content: str,
+        session_id: str | None = None,
+        reason: str | None = None,
+        status: str = "pending",
+        metadata: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        created_at: str | None = None,
+        applied_at: str | None = None,
+    ) -> str:
+        event_id = event_id or new_id()
+        self.conn.execute(
+            """
+            INSERT INTO memory_events(
+                id, session_id, memory_type, content, reason,
+                created_at, applied_at, status, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                session_id,
+                memory_type,
+                content,
+                reason,
+                created_at or now_iso(),
+                applied_at,
+                status,
+                dump_json(metadata),
+            ),
+        )
+        self.conn.commit()
+        return event_id
+
     def get_messages(self, session_id: str, limit: int | None = None) -> list[MessageRecord]:
-        sql = "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC"
-        args: tuple[Any, ...] = (session_id,)
-        if limit is not None:
-            sql += " LIMIT ?"
-            args = (session_id, limit)
-        rows = self.conn.execute(sql, args).fetchall()
+        if limit is None:
+            rows = self.conn.execute(
+                "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+                (session_id,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+                (session_id, limit),
+            ).fetchall()
+            rows = list(reversed(rows))
         return [
             MessageRecord(
                 id=row["id"],
@@ -103,6 +144,19 @@ class RuntimeStore:
             )
             for row in rows
         ]
+
+    def count_messages(self, session_id: str, role: str | None = None) -> int:
+        if role is None:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS count FROM messages WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS count FROM messages WHERE session_id = ? AND role = ?",
+                (session_id, role),
+            ).fetchone()
+        return int(row["count"] if row is not None else 0)
 
     def list_sessions(self, limit: int = 20) -> list[SessionRecord]:
         rows = self.conn.execute(
@@ -117,4 +171,3 @@ class RuntimeStore:
             )
             for row in rows
         ]
-

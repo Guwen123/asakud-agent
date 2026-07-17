@@ -1,9 +1,20 @@
-from .client import FetchWebAgent
-import json
-from langchain.tools import tool
+from langchain_core.tools import tool
 
-fetchWebAgent = FetchWebAgent()
+
+_fetch_web_agent = None
+
+
+def _get_fetch_web_agent():
+    global _fetch_web_agent
+    if _fetch_web_agent is None:
+        from .client import FetchWebAgent
+
+        _fetch_web_agent = FetchWebAgent()
+    return _fetch_web_agent
+
+
 @tool
 def fetch_web(query):
-    "通过调用子Agent来查询/获取网页信息"
-    return fetchWebAgent.run(query)
+    """Search the web through a focused child agent and return a concise answer."""
+
+    return _get_fetch_web_agent().run(query)

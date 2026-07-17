@@ -1,7 +1,10 @@
 fastapi
+python-multipart
 uvicorn[standard]
 pydantic
 langchain-core
 langgraph
 httpx
 langchain-openai
+playwright
+redis

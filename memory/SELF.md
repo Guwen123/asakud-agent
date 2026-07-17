@@ -1,15 +1,3 @@
-# Self Memory
+# Self Knowledge
 
-Long-term updates about how the agent should work.
-
-## Capability Boundaries
-
-- Pending.
-
-## Working Style
-
-- Pending.
-
-## Improvement Plan
-
-- Pending.
+## Self Knowledge

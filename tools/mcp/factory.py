@@ -25,6 +25,9 @@ def build_mcp_tools(config: dict[str, Any], enabled: list[str] | None = None) ->
 
 
 def _build_server_tools(server: dict[str, Any], enabled: list[str] | None) -> list[BaseTool]:
+    if not bool(server.get("enabled", True)):
+        return []
+
     base_url = str(server.get("base_url", "")).strip()
     if not base_url:
         return []
@@ -34,7 +37,19 @@ def _build_server_tools(server: dict[str, Any], enabled: list[str] | None) -> li
     if not isinstance(headers, dict):
         headers = {}
     timeout = float(server.get("timeout_seconds", 30))
-    client = MCPHttpClient(base_url=base_url, timeout_seconds=timeout, headers=headers)
+    list_req = server.get("list_tools_request", {})
+    call_req = server.get("call_tool_request", {})
+    if not isinstance(list_req, dict):
+        list_req = {}
+    if not isinstance(call_req, dict):
+        call_req = {}
+    client = MCPHttpClient(
+        base_url=base_url,
+        timeout_seconds=timeout,
+        headers=headers,
+        tools_path=str(list_req.get("path", "/tools") or "/tools"),
+        call_path=str(call_req.get("path", "/tools/call") or "/tools/call"),
+    )
 
     try:
         specs = client.list_tools()

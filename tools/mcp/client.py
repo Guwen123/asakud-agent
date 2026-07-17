@@ -19,14 +19,18 @@ class MCPHttpClient:
         base_url: str,
         timeout_seconds: float = 30.0,
         headers: dict[str, str] | None = None,
+        tools_path: str = "/tools",
+        call_path: str = "/tools/call",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.headers = headers or {}
+        self.tools_path = tools_path
+        self.call_path = call_path
 
     def list_tools(self) -> list[MCPToolSpec]:
         with httpx.Client(base_url=self.base_url, timeout=self.timeout_seconds, headers=self.headers) as client:
-            resp = client.get("/tools")
+            resp = client.get(self.tools_path)
             resp.raise_for_status()
             payload = resp.json()
         tools = payload.get("tools", []) if isinstance(payload, dict) else []
@@ -49,7 +53,7 @@ class MCPHttpClient:
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         body = {"name": name, "arguments": arguments or {}}
         with httpx.Client(base_url=self.base_url, timeout=self.timeout_seconds, headers=self.headers) as client:
-            resp = client.post("/tools/call", json=body)
+            resp = client.post(self.call_path, json=body)
             resp.raise_for_status()
             payload = resp.json()
         if isinstance(payload, dict) and "result" in payload:

@@ -3,3 +3,5 @@ __pycache__/
 db/*.db
 db/*.db-*
 db/*.log
+frontend/node_modules/
+frontend/dist/

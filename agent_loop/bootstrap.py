@@ -134,6 +134,34 @@ DEFAULT_SKILL_REGISTRY = """# Skill Registry
 """
 
 
+DEFAULT_STYLE_REGISTRY = """# Style Registry
+
+```json
+{
+  "default": "atri",
+  "styles": [
+    {
+      "id": "atri",
+      "name": "ATRI",
+      "type": "roleplay",
+      "summary": "Default ATRI response style used as the final style layer.",
+      "path": "styles/atri/SKILL.md",
+      "source": "skill"
+    },
+    {
+      "id": "plain",
+      "name": "Plain",
+      "type": "plain",
+      "summary": "Neutral, concise assistant tone.",
+      "guide": "Use a neutral, concise assistant tone. Prioritize clarity, accuracy, and directness.",
+      "source": "guide"
+    }
+  ]
+}
+```
+"""
+
+
 def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -154,7 +182,7 @@ def render_markdown_memory(item: dict[str, Any]) -> str:
         "",
     ]
     for section in item.get("sections", []):
-        lines.extend([f"## {section}", "", "- Pending.", ""])
+        lines.extend([f"## {section}", ""])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -186,6 +214,14 @@ def bootstrap_skill_registry(config: dict[str, Any]) -> list[str]:
     return created
 
 
+def bootstrap_style_registry(config: dict[str, Any]) -> list[str]:
+    registry_path = project_path(config.get("paths", {}).get("style_config_file", "styles/style.config.md"))
+    created: list[str] = []
+    if write_if_missing(registry_path, DEFAULT_STYLE_REGISTRY):
+        created.append(str(registry_path))
+    return created
+
+
 def bootstrap_meme_storage(config: dict[str, Any]) -> list[str]:
     paths_config = config.get("paths", {})
     meme_config = config.get("meme", {})
@@ -209,7 +245,7 @@ def bootstrap(config_path: str | Path = "agent.config.md") -> list[str]:
     config = load_config(config_path)
     created: list[str] = []
 
-    for key in ("memory_dir", "db_dir", "skills_dir", "tools_dir"):
+    for key in ("memory_dir", "db_dir", "skills_dir", "styles_dir", "tools_dir"):
         directory = project_path(config["paths"][key])
         directory.mkdir(parents=True, exist_ok=True)
         created.append(str(directory))
@@ -231,6 +267,7 @@ def bootstrap(config_path: str | Path = "agent.config.md") -> list[str]:
     created.append(str(database_path))
 
     created.extend(bootstrap_skill_registry(config))
+    created.extend(bootstrap_style_registry(config))
     created.extend(bootstrap_meme_storage(config))
     return created
 

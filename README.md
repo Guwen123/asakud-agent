@@ -1,245 +1,194 @@
 # asakud-agent
 
-`asakud-agent` is a local long-running agent system built with LangGraph, LangChain, FastAPI, SQLite, Markdown memory, and extensible tools.
+`asakud-agent` is a local long-running Agent system built with LangGraph, LangChain, FastAPI, SQLite, Redis hot memory, Markdown cold memory, executable skills, style layers, and browser-capable tools.
 
-`asakud-agent` 是一个基于 LangGraph、LangChain、FastAPI、SQLite、Markdown Memory 和可扩展工具体系构建的本地长运行 Agent 项目。
+`asakud-agent` 是一个本地长运行智能体系统，核心包含 LangGraph 主流程、LangChain 模型调用、FastAPI 服务、SQLite 会话记录、Redis 热记忆、Markdown 冷记忆、可执行 Skill、独立 Style 层以及浏览器检索工具。
 
 ## Overview
 
-This project is designed as a persistent assistant service rather than a one-shot script. It can receive external messages, keep short-term and long-term memory, execute scheduled tasks, call tools, and delegate focused work such as web research to child workflows.
+This project is designed as a persistent assistant service rather than a one-shot script. It can receive NapCat messages, maintain memory, call tools, run generated skills, rewrite final responses through style packages, and expose a React dashboard for runtime observation and package management.
 
-这个项目的目标不是一次性脚本，而是一个可持续运行的智能助理服务。它能够接收外部消息、维护短期和长期记忆、执行定时任务、调用工具，并将网页检索等专项任务下放给子工作流处理。
+本项目不是一次性脚本，而是一个可持续运行的本地 Agent 服务。它可以接收 NapCat 消息、维护记忆、调用工具、运行生成的 Skill、通过 Style 包统一最终语气，并提供 React 可视化面板用于查看运行状态和管理 Skill / Style。
+
+## Current Workflow
+
+```text
+incoming message
+  -> import_db
+  -> router_meme
+  -> md_memory
+  -> agent_model
+  -> tools / run_skill loop
+  -> style
+  -> save_long_term
+  -> trim_short_term
+  -> export_db
+  -> save_skill
+  -> print_meme
+  -> response
+```
+
+Prompt order for the main model:
+
+```text
+B1: static system prompt + cold Markdown memory
+B2: Redis hot memory
+A: RECENT_SUMMARY
+C: current question
+```
+
+The main workflow no longer uses a separate workflow router for tool or memory decisions. Tool use is handled by model tool-calling, and cold memory is loaded in a stable order to improve KV-cache friendliness.
+
+主流程不再使用额外的工具 / 记忆路由器。工具调用交给模型 tool-calling 决策，冷记忆按固定顺序加载，以尽量提升 KV-cache 命中稳定性。
 
 ## Features
 
-- Workflow-first architecture powered by LangGraph.
-- Hybrid memory design with SQLite session state and Markdown long-term memory.
-- FastAPI service runtime for continuous operation.
-- NapCat integration for message receiving and sending.
-- Tool registry that supports built-in tools, browser-based tools, and MCP tools.
-- Child workflow support, including a Playwright-powered `fetch_web` sub-agent.
-- Meme collection, emotion tagging, and meme selection flow.
-
-- 基于 LangGraph 的工作流式 Agent 架构。
-- SQLite 会话状态 + Markdown 长期记忆的混合记忆设计。
-- 基于 FastAPI 的常驻服务运行方式。
-- 集成 NapCat，支持消息接收与发送。
-- 统一工具注册机制，支持内置工具、浏览器工具和 MCP 工具。
-- 支持子工作流，例如基于 Playwright 的 `fetch_web` 检索子 Agent。
-- 支持表情包收集、情绪标注与发送选择流程。
-
-## Architecture
-
-```text
-Incoming message
-  -> router / skill loader / memory loader
-  -> RAG / Markdown memory retrieval
-  -> main model
-  -> tool execution if needed
-  -> long-term memory write-back
-  -> short-term memory trimming
-  -> final response / meme output
-```
-
-Core modules:
-
-- `main.py`: FastAPI entrypoint and NapCat bridge.
-- `agent_loop/workflow.py`: main LangGraph workflow definition.
-- `agent_loop/nodes/`: router, memory, RAG, skill, meme, and output nodes.
-- `db/runtime/`: SQLite-backed runtime state.
-- `memory/`: Markdown memory files and write-back logic.
-- `tools/`: tool registry, local tools, and child workflows such as `fetch_web`.
-
-核心模块：
-
-- `main.py`：FastAPI 服务入口与 NapCat 消息桥接层。
-- `agent_loop/workflow.py`：主 LangGraph 工作流定义。
-- `agent_loop/nodes/`：路由、记忆、RAG、技能、表情包和输出节点。
-- `db/runtime/`：基于 SQLite 的运行时状态存储。
-- `memory/`：Markdown 记忆文件与写回逻辑。
-- `tools/`：工具注册中心、本地工具以及 `fetch_web` 等子工作流。
+- LangGraph-based main workflow with explicit node ordering.
+- FastAPI service runtime with NapCat callback and send-message endpoints.
+- SQLite append-only raw conversation history plus `memory/RECENT_SUMMARY.md` prompt context.
+- Markdown cold memory: `MEMORY.md`, `SELF.md`, `CORE.md`, `PENDING.md`.
+- Redis hot memory for staged memory updates before cold Markdown writes.
+- Playwright-powered `fetch_web` tool/sub-agent for web search, browsing, extraction, and summarization.
+- Executable Skill system with `SKILL.md`, `reference/`, optional `scripts/`, `entry`, and `skill.config.md`.
+- Independent Style system under `styles/`, with `styles/style.config.md` recording style type and source.
+- Async background workers for long-term memory updates and skill building.
+- React dashboard for Agent/computer status, Skill list/upload, and Style list/upload.
 
 ## Project Structure
 
 ```text
 asakud-agent/
-├─ agent.config.md
-├─ main.py
-├─ agent_loop/
-│  ├─ workflow.py
-│  ├─ models/
-│  └─ nodes/
-├─ db/
-├─ memory/
-├─ tools/
-│  ├─ registry.py
-│  └─ fetch_web/
-├─ skills/
-└─ meme/
+|-- main.py                         # FastAPI entrypoint and dashboard API
+|-- agent.config.md                 # Runtime configuration
+|-- agent_loop/                     # Main LangGraph workflow and nodes
+|-- compact/                        # RECENT_SUMMARY loading/appending/compaction
+|-- db/                             # SQLite schema and runtime store
+|-- memory/                         # Cold memory and forgetting/hot-store helpers
+|-- memory_worker/                  # Async memory update sub-agent
+|-- skill_builder/                  # Async skill generation sub-agent
+|-- skill_runner/                   # Skill execution sub-agent
+|-- style_runner/                   # Final response style sub-agent
+|-- prompts/                        # Prompt templates
+|-- tools/                          # Tool registry, fetch_web, MCP tools
+|-- skills/                         # Executable skill registry and imported skills
+|-- styles/                         # Style registry and style packages
+|-- frontend/                       # React dashboard
+`-- meme/                           # Meme metadata and image storage
 ```
 
 ## Quick Start
 
-### 1. Install dependencies
+### Backend
 
 ```powershell
 pip install -r requirements.txt
-```
-
-If you want the `fetch_web` child workflow to control a real browser:
-
-```powershell
-pip install playwright
-playwright install chromium
-```
-
-如果你希望 `fetch_web` 子工作流真正驱动浏览器，还需要额外安装 Playwright：
-
-```powershell
-pip install playwright
-playwright install chromium
-```
-
-### 2. Bootstrap runtime files
-
-```powershell
 python agent_loop\bootstrap.py
-```
-
-This step prepares configured runtime resources such as:
-
-- Markdown memory files
-- SQLite schema and database
-- skill registry files
-- meme storage directories
-
-这一步会生成和初始化运行时资源，例如：
-
-- Markdown 记忆文件
-- SQLite 数据库与 schema
-- skill registry 文件
-- meme 存储目录
-
-### 3. Start the service
-
-```powershell
 python main.py
 ```
 
+If you need browser automation:
+
+```powershell
+playwright install chromium
+```
+
+### Frontend Dashboard
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+The dashboard calls `http://127.0.0.1:8000` by default. If the backend runs elsewhere, set `VITE_API_BASE`.
+
 ## Configuration
 
-All runtime configuration is stored in the fenced JSON block inside `agent.config.md`.
+Runtime configuration lives in the fenced JSON block inside `agent.config.md`.
 
-Important sections:
+运行配置位于 `agent.config.md` 的 JSON 代码块中。
 
-- `model`: main chat model
-- `route_model`: lightweight routing / utility model
-- `multimodal_model`: image-capable model for meme analysis
-- `memory`: Markdown memory definitions and SQLite setup
-- `db`: session database paths and defaults
-- `loop`: workflow loop settings
-- `tools`: enabled tools
-- `napcat`: message bridge settings
-- `meme`: meme storage and send/collect behavior
+Sensitive values can be written as environment placeholders:
 
-所有运行配置都放在 `agent.config.md` 的 JSON 代码块中。
+```json
+{
+  "model": {
+    "api_key": "${MIMO_API_KEY}"
+  },
+  "napcat": {
+    "token": "${NAPCAT_TOKEN}"
+  }
+}
+```
 
-重点配置项包括：
+If the environment variable is not set, the original placeholder text is kept. This keeps local development compatible while allowing safer deployment configuration.
 
-- `model`：主对话模型
-- `route_model`：轻量路由/工具模型
-- `multimodal_model`：用于表情识别的多模态模型
-- `memory`：Markdown 记忆和 SQLite 配置
-- `db`：会话数据库路径与默认设置
-- `loop`：工作流循环参数
-- `tools`：启用的工具列表
-- `napcat`：消息桥接配置
-- `meme`：表情包存储与收发行为配置
+## API
 
-## Tooling
+- `POST /getMessage`: receive NapCat callback messages.
+- `POST /sendMessage`: send outbound NapCat messages.
+- `GET /api/dashboard/status`: read Agent/computer/runtime status.
+- `GET /api/dashboard/skills`: list registered executable skills.
+- `POST /api/dashboard/skills/upload`: upload a Skill zip package.
+- `GET /api/dashboard/styles`: list response styles.
+- `POST /api/dashboard/styles/upload`: upload a Style zip package.
 
-The tool system is registry-based.
+## Skills
 
-- Built-in tools are defined in `tools/registry.py`.
-- Browser-oriented web tools live in `tools/fetch_web/tools.py`.
-- The `fetch_web` child workflow lives in `tools/fetch_web/client.py`.
-- MCP tools can be loaded dynamically through configuration.
+Skills are executable task packages. A full skill may contain:
 
-工具系统基于统一注册中心。
+```text
+SKILL.md
+skill.json
+reference/
+scripts/
+```
 
-- 内置工具定义在 `tools/registry.py`
-- 面向浏览器交互的网页工具定义在 `tools/fetch_web/tools.py`
-- `fetch_web` 子工作流定义在 `tools/fetch_web/client.py`
-- MCP 工具可以通过配置动态接入
+`skills/skill.config.md` records registered skills. The main Agent can call `run_skill` during the normal tool loop. `SkillRunnerAgent` executes a script entry first when available; otherwise it runs an LLM sub-agent with enabled tools such as `fetch_web`.
 
-## Workflow Notes
+Skill 是可执行任务包，可以包含提示词、参考资料和可选脚本。主流程会在工具循环中调用 `run_skill`，由 `SkillRunnerAgent` 独立完成任务，再把结果交回主流程进行统一输出与风格处理。
 
-### Main workflow
+## Styles
 
-The main workflow handles memory loading, routing, model execution, tool invocation, memory write-back, and final output formatting.
+Styles are final response rewrite packages and are separate from executable skills.
 
-主工作流负责记忆加载、路由决策、模型执行、工具调用、记忆写回以及最终输出整理。
+```text
+styles/
+|-- style.config.md
+`-- atri/
+    |-- SKILL.md
+    |-- soul.md
+    |-- limit.md
+    `-- resource/
+```
 
-### `fetch_web` child workflow
+`styles/style.config.md` records each style's `id`, `name`, `type`, `path` or `guide`, and `source`. ATRI is now a Style package, not a Skill package.
 
-The `fetch_web` workflow is a focused web-research sub-agent. It uses a smaller context than the main workflow, which helps reduce irrelevant prompt overhead during browser-based retrieval tasks.
+Style 只负责最终语气改写，不参与工具调用和任务执行。ATRI 已从 `skills/` 拆出，放入 `styles/atri/`。
 
-`fetch_web` 是一个专门负责网页检索的子 Agent。它使用比主工作流更轻的上下文，能减少浏览器检索场景中的无关提示词负担。
+## Why No Nginx Yet?
 
-Typical flow:
+Nginx is not required for the current local development architecture:
 
-1. Search or open a target page.
-2. Inspect the page state.
-3. Click into relevant results.
-4. Extract target information.
-5. Return a concise answer to the parent agent.
+- FastAPI serves the backend API directly on `127.0.0.1:8000`.
+- Vite serves the React dashboard during development on `127.0.0.1:5173`.
+- The Agent is intended to run locally with NapCat and local tools, so a reverse proxy is optional.
 
-典型流程：
+Use Nginx when deploying beyond local development:
 
-1. 搜索或打开目标页面。
-2. 检查当前页面状态。
-3. 点击相关结果继续深入。
-4. 抽取目标信息。
-5. 向父 Agent 返回精简结论。
+- Serve `frontend/dist` as static files.
+- Reverse proxy `/api/*`, `/getMessage`, and `/sendMessage` to FastAPI.
+- Terminate HTTPS.
+- Add compression, caching, and access control.
 
-## API / Entry Points
+For local iteration, adding Nginx now would increase configuration complexity without improving the Agent logic.
 
-- `POST /getMessage`: receive NapCat callback messages
-- `POST /sendMessage`: send outbound messages through NapCat
-- `agent_loop/loop.py`: run the main workflow once from Python or CLI
+当前本地开发阶段不需要 Nginx：FastAPI 和 Vite 已经能分别承担后端 API 与前端开发服务。只有在部署到服务器、需要 HTTPS、静态资源托管、反向代理、压缩缓存或访问控制时，才建议加入 Nginx。
 
-## Use Cases
+## Resume Highlights
 
-- Personal local assistant with persistent memory
-- QQ/NapCat-connected chat agent
-- Tool-augmented workflow experiments
-- Browser-based web retrieval through a child agent
-- Local meme collection and contextual meme reply experiments
-
-- 带长期记忆的本地个人助理
-- 接入 QQ / NapCat 的聊天 Agent
-- 工具增强型工作流实验项目
-- 通过子 Agent 实现浏览器检索
-- 本地表情包收集与上下文发图实验
-
-## Highlights
-
-- Explicit workflow modeling instead of hidden orchestration.
-- Memory separation between short-term state and durable knowledge.
-- Tool modularity across local tools, browser tools, and remote MCP tools.
-- Practical sub-agent design for high-noise tasks such as web browsing.
-
-- 显式工作流建模，而不是隐式流程拼接。
-- 短期状态与长期知识分层管理。
-- 本地工具、浏览器工具和 MCP 工具共用统一执行路径。
-- 对网页检索这类高噪声任务采用子 Agent 拆分设计。
-
-## Development Notes
-
-- Re-run `python agent_loop\bootstrap.py` after changing config-backed runtime resources.
-- Install Playwright only if you need real browser automation.
-- Group-chat message handling currently requires explicit `@agent` mentions before the workflow runs.
-
-- 如果修改了受配置驱动的运行时资源，请重新执行 `python agent_loop\bootstrap.py`
-- 只有在需要真实浏览器控制时才安装 Playwright
-- 当前群聊消息需要显式 `@agent` 才会进入工作流
+- Built a LangGraph-based local long-running Agent with memory, tools, style finalization, and async sub-agents.
+- Implemented `fetch_web` as a focused Playwright web-research sub-agent, reducing main-context token overhead by isolating search/browse/extract/summarize tasks.
+- Designed an executable Skill system with asynchronous skill generation, package registration, optional scripts, references, and tool-enabled execution.
+- Split response Style into an independent package system with a final style sub-agent, enabling persona/tone control without polluting task skills.
+- Added a React dashboard for visualizing Agent/computer status and managing Skill/Style zip packages.

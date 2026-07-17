@@ -17,13 +17,13 @@ from langchain_core.runnables import Runnable, RunnableLambda
 
 from ..config_loader import load_config, project_path
 from ..models.factory import build_chat_model, build_multimodal_model
-from ..prompts import MEME_PICKER_PROMPT, MEME_VISION_PROMPT
+from prompts.meme import MEME_PICKER_PROMPT, MEME_VISION_PROMPT
 
 CQ_IMAGE_RE = re.compile(r"\[CQ:image,([^\]]+)\]")
-MEME_ACTION_KEYWORDS = ["设置表情包", "添加表情包", "保存表情包"]
-NAME_SPLITTERS = ["为", "叫", "成"]
+MEME_ACTION_KEYWORDS = ["\u8bbe\u7f6e\u8868\u60c5\u5305", "\u6dfb\u52a0\u8868\u60c5\u5305", "\u4fdd\u5b58\u8868\u60c5\u5305"]
+NAME_SPLITTERS = ["\u53eb", "\u53eb\u505a", "\u547d\u540d\u4e3a", "\u53d6\u540d\u4e3a"]
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-DEFAULT_EMOTION = "图片表情"
+DEFAULT_EMOTION = "\u56fe\u7247\u8868\u60c5"
 
 
 def get_router_meme_node(config: dict | None = None) -> Runnable:

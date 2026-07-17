@@ -1,18 +1,29 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
+import os
+import platform
 import re
+import shutil
+import tempfile
+import time
+import zipfile
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from agent_loop.background import start_background_workers, stop_background_workers
 from agent_loop.bootstrap import bootstrap
-from agent_loop.config_loader import load_config
+from agent_loop.config_loader import load_config, project_path
 from agent_loop.loop import run_agent_once_async
+from agent_loop.nodes.skills import load_skill_registry, write_skill_registry
 from agent_loop.scheduler import MarkdownTaskScheduler
 
 
@@ -38,7 +49,9 @@ async def scheduled_task_loop(app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     bootstrap()
     app.state.config = load_config()
+    app.state.started_at = time.time()
     app.state.last_message_target = None
+    app.state.background_workers = start_background_workers(app.state.config)
     app.state.scheduler = MarkdownTaskScheduler(
         app.state.config,
         execute_task=lambda task_content: _execute_scheduled_task(app, task_content),
@@ -50,6 +63,7 @@ async def lifespan(app: FastAPI):
         app.state.scheduler_task.cancel()
         with suppress(asyncio.CancelledError):
             await app.state.scheduler_task
+        await stop_background_workers()
 
 
 app = FastAPI(
@@ -57,6 +71,17 @@ app = FastAPI(
     description="Long-running local Agent service.",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -101,6 +126,71 @@ async def get_message(request: Request) -> dict[str, Any]:
 async def send_message(request: SendMessageRequest) -> dict[str, Any]:
     result = await _send_message(app, request)
     return {"ok": True, "result": result}
+
+
+@app.get("/api/dashboard/status")
+async def dashboard_status() -> dict[str, Any]:
+    config = app.state.config
+    skills = load_skill_registry(config)
+    styles = _list_styles(config)
+    return {
+        "ok": True,
+        "agent": {
+            "name": config.get("agent", {}).get("name", "sakuro-agent"),
+            "description": config.get("agent", {}).get("description", ""),
+            "language": config.get("agent", {}).get("language", "zh-CN"),
+            "timezone": config.get("agent", {}).get("timezone", ""),
+            "uptime_seconds": int(time.time() - float(getattr(app.state, "started_at", time.time()))),
+        },
+        "runtime": {
+            "background_workers": bool(getattr(app.state, "background_workers", None)),
+            "scheduler": bool(getattr(app.state, "scheduler_task", None))
+            and not app.state.scheduler_task.done(),
+            "napcat": bool(config.get("napcat", {}).get("enabled", False)),
+            "redis": bool(config.get("redis", {}).get("enabled", False)),
+            "tools": config.get("tools", {}).get("enabled", []),
+            "skill_count": len(skills),
+            "style_count": len(styles),
+        },
+        "computer": _computer_status(),
+    }
+
+
+@app.get("/api/dashboard/skills")
+async def dashboard_skills() -> dict[str, Any]:
+    config = app.state.config
+    return {
+        "ok": True,
+        "skills": [_skill_payload(item) for item in load_skill_registry(config)],
+    }
+
+
+@app.post("/api/dashboard/skills/upload")
+async def upload_skill_package(file: UploadFile = File(...)) -> dict[str, Any]:
+    if not _is_zip_upload(file):
+        raise HTTPException(status_code=400, detail="Only .zip skill packages are supported.")
+    config = app.state.config
+    try:
+        entry = await _install_skill_zip(config, file)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "skill": _skill_payload(entry)}
+
+
+@app.get("/api/dashboard/styles")
+async def dashboard_styles() -> dict[str, Any]:
+    return {"ok": True, "styles": _list_styles(app.state.config)}
+
+
+@app.post("/api/dashboard/styles/upload")
+async def upload_style_package(file: UploadFile = File(...)) -> dict[str, Any]:
+    if not _is_zip_upload(file):
+        raise HTTPException(status_code=400, detail="Only .zip style packages are supported.")
+    try:
+        style = await _install_style_zip(app.state.config, file)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "style": style}
 
 
 async def _execute_scheduled_task(app: FastAPI, task_content: str) -> None:
@@ -159,6 +249,325 @@ async def _send_message(app: FastAPI, request: SendMessageRequest) -> dict[str, 
             resp.raise_for_status()
             results["image"] = resp.json() if resp.content else {"ok": True}
         return results or {"ok": False, "reason": "empty_message"}
+
+
+def _computer_status() -> dict[str, Any]:
+    total_memory, used_memory = _memory_snapshot()
+    disk = shutil.disk_usage(project_path("."))
+    return {
+        "platform": platform.platform(),
+        "python": platform.python_version(),
+        "processor": platform.processor() or platform.machine(),
+        "pid": os.getpid(),
+        "cpu": {
+            "cores": os.cpu_count() or 0,
+            "load_average": _load_average(),
+        },
+        "memory": {
+            "total_mb": _bytes_to_mb(total_memory),
+            "used_mb": _bytes_to_mb(used_memory),
+            "percent": round((used_memory / total_memory) * 100, 1) if total_memory else None,
+        },
+        "disk": {
+            "total_mb": _bytes_to_mb(disk.total),
+            "used_mb": _bytes_to_mb(disk.used),
+            "percent": round((disk.used / disk.total) * 100, 1) if disk.total else None,
+        },
+    }
+
+
+def _memory_snapshot() -> tuple[int, int]:
+    if os.name == "nt":
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = MemoryStatus()
+        status.dwLength = ctypes.sizeof(MemoryStatus)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            total = int(status.ullTotalPhys)
+            available = int(status.ullAvailPhys)
+            return total, max(total - available, 0)
+    meminfo = Path("/proc/meminfo")
+    if meminfo.exists():
+        values: dict[str, int] = {}
+        for line in meminfo.read_text(encoding="utf-8", errors="ignore").splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                values[parts[0].rstrip(":")] = int(parts[1]) * 1024
+        total = values.get("MemTotal", 0)
+        available = values.get("MemAvailable", 0)
+        return total, max(total - available, 0)
+    return 0, 0
+
+
+def _load_average() -> list[float]:
+    try:
+        return [round(value, 2) for value in os.getloadavg()]
+    except (AttributeError, OSError):
+        return []
+
+
+def _bytes_to_mb(value: int) -> float:
+    return round(float(value) / 1024 / 1024, 2) if value else 0.0
+
+
+def _skill_payload(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(item.get("id", "") or ""),
+        "summary": str(item.get("summary", "") or ""),
+        "path": str(item.get("path", "") or ""),
+        "type": str(item.get("type", "workflow") or "workflow"),
+        "tools": item.get("tools", []),
+        "references": item.get("references", []),
+        "entry": str(item.get("entry", "") or ""),
+        "max_steps": item.get("max_steps", 8),
+    }
+
+
+def _read_style_registry(config: dict[str, Any]) -> dict[str, Any]:
+    path = project_path(config.get("paths", {}).get("style_config_file", "styles/style.config.md"))
+    if not path.exists():
+        return {"default": str(config.get("style", {}).get("default", "atri") or "atri"), "styles": []}
+    text = path.read_text(encoding="utf-8")
+    match = re.search(r"```json\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+    raw = match.group(1) if match else text
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"default": str(config.get("style", {}).get("default", "atri") or "atri"), "styles": []}
+    if not isinstance(data, dict):
+        return {"default": str(config.get("style", {}).get("default", "atri") or "atri"), "styles": []}
+    if not isinstance(data.get("styles"), list):
+        data["styles"] = []
+    data.setdefault("default", str(config.get("style", {}).get("default", "atri") or "atri"))
+    return data
+
+
+def _write_style_registry(config: dict[str, Any], registry: dict[str, Any]) -> None:
+    path = project_path(config.get("paths", {}).get("style_config_file", "styles/style.config.md"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "default": str(registry.get("default", "atri") or "atri"),
+        "styles": [
+            item
+            for item in registry.get("styles", [])
+            if isinstance(item, dict) and _slugify(str(item.get("id", "") or ""))
+        ],
+    }
+    content = "# Style Registry\n\n```json\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n```\n"
+    path.write_text(content, encoding="utf-8")
+
+
+def _list_styles(config: dict[str, Any]) -> list[dict[str, Any]]:
+    registry = _read_style_registry(config)
+    default_id = _slugify(str(registry.get("default", "") or config.get("style", {}).get("default", "atri")))
+    result: list[dict[str, Any]] = []
+    for item in registry.get("styles", []):
+        if not isinstance(item, dict):
+            continue
+        style_id = _slugify(str(item.get("id", "") or ""))
+        if not style_id:
+            continue
+        result.append(
+            {
+                "id": style_id,
+                "name": str(item.get("name", style_id) or style_id),
+                "type": str(item.get("type", "custom") or "custom"),
+                "summary": str(item.get("summary", "") or item.get("guide", "") or ""),
+                "path": str(item.get("path", "") or item.get("skill_path", "") or ""),
+                "default": style_id == default_id,
+                "source": str(item.get("source", "") or ("guide" if item.get("guide") else "skill")),
+            }
+        )
+    return result
+
+
+def _is_zip_upload(file: UploadFile) -> bool:
+    filename = str(file.filename or "").lower()
+    return filename.endswith(".zip")
+
+
+async def _install_skill_zip(config: dict[str, Any], file: UploadFile) -> dict[str, Any]:
+    package_root, metadata = await _unpack_skill_like_zip(file)
+    try:
+        slug = _unique_slug(project_path(config.get("paths", {}).get("skills_dir", "skills")) / "imported", _package_id(file, package_root, metadata))
+        target_root = project_path(config.get("paths", {}).get("skills_dir", "skills")) / "imported" / slug
+        shutil.copytree(package_root, target_root)
+
+        skill_path = target_root / "SKILL.md"
+        entry = {
+            "id": slug,
+            "summary": str(metadata.get("summary", "") or _read_first_heading(skill_path) or slug),
+            "path": _relative_project_path(skill_path),
+            "type": str(metadata.get("type", "workflow") or "workflow"),
+        }
+        for key in ("entry", "tools", "references", "max_steps"):
+            if key in metadata and metadata[key] not in ("", None, [], {}):
+                entry[key] = metadata[key]
+
+        registry = [item for item in load_skill_registry(config) if item.get("id") != slug]
+        registry.append(entry)
+        write_skill_registry(config, registry)
+        return entry
+    finally:
+        _cleanup_upload_tree(package_root)
+
+
+async def _install_style_zip(config: dict[str, Any], file: UploadFile) -> dict[str, Any]:
+    package_root, metadata = await _unpack_skill_like_zip(file)
+    try:
+        styles_root = project_path(config.get("paths", {}).get("styles_dir", "styles")) / "imported"
+        slug = _unique_slug(styles_root, _package_id(file, package_root, metadata))
+        target_root = styles_root / slug
+        shutil.copytree(package_root, target_root)
+
+        skill_path = target_root / "SKILL.md"
+        registry = _read_style_registry(config)
+        styles = [item for item in registry.get("styles", []) if _slugify(str(item.get("id", "") or "")) != slug]
+        style_entry = {
+            "id": slug,
+            "name": str(metadata.get("name", "") or _read_first_heading(skill_path) or slug),
+            "type": str(metadata.get("type", "custom") or "custom"),
+            "summary": str(metadata.get("summary", "") or ""),
+            "path": _relative_project_path(skill_path),
+            "source": "skill",
+        }
+        styles.append(style_entry)
+        registry["styles"] = styles
+        registry.setdefault("default", str(config.get("style", {}).get("default", "atri") or "atri"))
+        _write_style_registry(config, registry)
+        return {**style_entry, "default": _slugify(str(registry.get("default", "atri"))) == slug}
+    finally:
+        _cleanup_upload_tree(package_root)
+
+
+async def _unpack_skill_like_zip(file: UploadFile) -> tuple[Path, dict[str, Any]]:
+    data = await file.read()
+    if not data:
+        raise ValueError("Uploaded zip is empty.")
+    temp_dir = Path(tempfile.mkdtemp(prefix="sakuro-upload-"))
+    zip_path = temp_dir / "package.zip"
+    zip_path.write_bytes(data)
+    extract_root = temp_dir / "extract"
+    extract_root.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            _safe_extract_zip(archive, extract_root)
+    except zipfile.BadZipFile as exc:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise ValueError("Invalid zip package.") from exc
+    except ValueError:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+
+    skill_files = [
+        path
+        for path in extract_root.rglob("SKILL.md")
+        if "__MACOSX" not in path.parts and path.is_file()
+    ]
+    if not skill_files:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise ValueError("Zip package must contain a SKILL.md file.")
+    package_root = skill_files[0].parent
+    metadata = _read_package_metadata(package_root)
+    return package_root, metadata
+
+
+def _safe_extract_zip(archive: zipfile.ZipFile, target: Path) -> None:
+    target_root = target.resolve()
+    for member in archive.infolist():
+        name = member.filename.replace("\\", "/")
+        if not name or name.endswith("/"):
+            continue
+        destination = (target / name).resolve()
+        if target_root not in destination.parents and destination != target_root:
+            raise ValueError("Zip package contains an unsafe path.")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(member) as source, destination.open("wb") as handle:
+            shutil.copyfileobj(source, handle)
+
+
+def _read_package_metadata(package_root: Path) -> dict[str, Any]:
+    for name in ("skill.json", "style.json"):
+        path = package_root / name
+        if path.exists() and path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return data if isinstance(data, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+    return {}
+
+
+def _cleanup_upload_tree(package_root: Path) -> None:
+    for parent in [package_root, *package_root.parents]:
+        if parent.name.startswith("sakuro-upload-"):
+            shutil.rmtree(parent, ignore_errors=True)
+            return
+
+
+def _package_id(file: UploadFile, package_root: Path, metadata: dict[str, Any]) -> str:
+    return _slugify(str(metadata.get("id", "") or package_root.name or file.filename or "package"))
+
+
+def _unique_slug(root: Path, base: str) -> str:
+    root.mkdir(parents=True, exist_ok=True)
+    slug = _slugify(base) or "package"
+    candidate = slug
+    index = 2
+    while (root / candidate).exists():
+        candidate = f"{slug}-{index}"
+        index += 1
+    return candidate
+
+
+def _slugify(value: str) -> str:
+    lowered = value.strip().lower().replace("_", "-").replace(" ", "-")
+    normalized = re.sub(r"[^a-z0-9\-]+", "-", lowered)
+    return re.sub(r"-{2,}", "-", normalized).strip("-")
+
+
+def _read_first_heading(path: Path) -> str:
+    if not path.exists():
+        return ""
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            return stripped.lstrip("#").strip()
+    return ""
+
+
+def _relative_project_path(path: Path) -> str:
+    root = project_path(".").resolve()
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(root)).replace("\\", "/")
+    except ValueError:
+        return str(resolved).replace("\\", "/")
+
+
+def _write_runtime_config(config: dict[str, Any]) -> None:
+    config_path = project_path("agent.config.md")
+    text = config_path.read_text(encoding="utf-8")
+    rendered = json.dumps(config, ensure_ascii=False, indent=2)
+    updated = re.sub(
+        r"```json\s*(\{.*?\})\s*```",
+        lambda _match: f"```json\n{rendered}\n```",
+        text,
+        count=1,
+        flags=re.DOTALL,
+    )
+    config_path.write_text(updated, encoding="utf-8")
 
 
 def _extract_text(message: Any) -> str:

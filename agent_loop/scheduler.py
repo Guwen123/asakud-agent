@@ -126,8 +126,5 @@ class MarkdownTaskScheduler:
     def _default_schedule_markdown() -> str:
         return (
             "# Scheduled Tasks\n\n"
-            "Use line format below in Active section:\n"
-            f"- [ ] 2026-05-17T21:30:00+08:00 | send hello to user ({TIME_FORMAT_HINT})\n\n"
-            "## Active\n\n"
-            "- None yet.\n"
+            "## Tasks\n"
         )
