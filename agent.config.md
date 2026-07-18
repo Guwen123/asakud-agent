@@ -1,11 +1,11 @@
-# Sakuro Agent Config
+# asakud-agent Config
 
 The program reads the fenced `json` block below as its runtime configuration.
 
 ```json
 {
   "agent": {
-    "name": "sakuro-agent",
+    "name": "asakud-agent",
     "description": "Local long-running memory agent.",
     "language": "zh-CN",
     "timezone": "Asia/Shanghai"
@@ -25,28 +25,28 @@ The program reads the fenced `json` block below as its runtime configuration.
     "report_format": "string"
   },
   "main_model": {
-    "provider": "token-plan-cn",
+    "provider": "custom",
     "protocol": "openai-compatible",
-    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "${MIMO_API_KEY}",
+    "base_url": "",
+    "api_key": "",
     "name": "mimo-v2.5-pro",
     "temperature": 0.2,
     "max_output_tokens": 4096
   },
   "route_model": {
-    "provider": "token-plan-cn",
+    "provider": "custom",
     "protocol": "openai-compatible",
-    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "${MIMO_API_KEY}",
+    "base_url": "",
+    "api_key": "",
     "name": "mimo-v2.5",
     "temperature": 0.0,
     "max_output_tokens": 512
   },
   "multimodal_model": {
-    "provider": "token-plan-cn",
+    "provider": "custom",
     "protocol": "openai-compatible",
-    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "${MIMO_API_KEY}",
+    "base_url": "",
+    "api_key": "",
     "name": "mimo-v2-omni",
     "temperature": 0.0,
     "max_output_tokens": 1024

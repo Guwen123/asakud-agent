@@ -149,6 +149,24 @@ nav button.active i {
   font-size: 22px;
 }
 
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.language-toggle {
+  min-width: 58px;
+  border: 1px solid rgba(255, 128, 179, 0.28);
+  padding: 11px 16px;
+  border-radius: 999px;
+  color: #d82b75;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 24px rgba(225, 133, 178, 0.12);
+  font-weight: 900;
+  cursor: pointer;
+}
+
 .refresh {
   border: 0;
   padding: 12px 18px;
@@ -642,6 +660,14 @@ nav button.active i {
   .package-item {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .top-actions {
+    width: 100%;
+  }
+
+  .top-actions .refresh {
+    flex: 1;
   }
 
   .hero-grid,

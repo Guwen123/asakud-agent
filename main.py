@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Sakuro Agent",
+    title="asakud-agent",
     description="Long-running local Agent service.",
     version="0.1.0",
     lifespan=lifespan,
@@ -168,7 +168,7 @@ async def dashboard_status() -> dict[str, Any]:
     return {
         "ok": True,
         "agent": {
-            "name": config.get("agent", {}).get("name", "sakuro-agent"),
+            "name": config.get("agent", {}).get("name", "asakud-agent"),
             "description": config.get("agent", {}).get("description", ""),
             "language": config.get("agent", {}).get("language", "zh-CN"),
             "timezone": config.get("agent", {}).get("timezone", ""),
@@ -460,7 +460,7 @@ def _model_config_payload(config: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def _normalize_model_config(request: LLMModelConfigRequest, *, previous: Any) -> dict[str, Any]:
-    previous_config = previous if isinstance(previous, dict) else {}
+    _ = previous
     base_url = str(request.base_url or "").strip().rstrip("/")
     parsed = urlparse(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -472,9 +472,12 @@ def _normalize_model_config(request: LLMModelConfigRequest, *, previous: Any) ->
 
     api_key = str(request.api_key or "").strip()
     if not api_key:
-        api_key = str(previous_config.get("api_key", "") or "").strip()
-    if not api_key:
         raise HTTPException(status_code=400, detail="Model api_key is required.")
+    if _looks_like_env_placeholder(api_key) or _looks_like_env_placeholder(base_url):
+        raise HTTPException(
+            status_code=400,
+            detail="Model base_url and api_key must be entered directly from the dashboard, not as ${ENV_VAR} placeholders.",
+        )
 
     return {
         "provider": str(request.provider or "custom").strip() or "custom",
@@ -632,6 +635,11 @@ def _authorization_header(value: str | None) -> str:
     return text if text.lower().startswith("bearer ") else f"Bearer {text}"
 
 
+def _looks_like_env_placeholder(value: str) -> bool:
+    text = str(value or "").strip()
+    return text.startswith("${") and text.endswith("}")
+
+
 def _read_style_registry(config: dict[str, Any]) -> dict[str, Any]:
     path = project_path(config.get("paths", {}).get("style_config_file", "styles/style.config.md"))
     if not path.exists():
@@ -753,7 +761,7 @@ async def _unpack_skill_like_zip(file: UploadFile) -> tuple[Path, dict[str, Any]
     data = await file.read()
     if not data:
         raise ValueError("Uploaded zip is empty.")
-    temp_dir = Path(tempfile.mkdtemp(prefix="sakuro-upload-"))
+    temp_dir = Path(tempfile.mkdtemp(prefix="asakud-upload-"))
     zip_path = temp_dir / "package.zip"
     zip_path.write_bytes(data)
     extract_root = temp_dir / "extract"
@@ -809,7 +817,7 @@ def _read_package_metadata(package_root: Path) -> dict[str, Any]:
 
 def _cleanup_upload_tree(package_root: Path) -> None:
     for parent in [package_root, *package_root.parents]:
-        if parent.name.startswith("sakuro-upload-"):
+        if parent.name.startswith("asakud-upload-"):
             shutil.rmtree(parent, ignore_errors=True)
             return
 

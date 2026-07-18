@@ -104,21 +104,13 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 2. Configure environment variables
-
-```powershell
-$env:MIMO_API_KEY="your_api_key"
-```
-
-The default model settings are stored in `agent.config.md`.
-
-### 3. Bootstrap local files and database
+### 2. Bootstrap local files and database
 
 ```powershell
 python agent_loop\bootstrap.py
 ```
 
-### 4. Start the backend
+### 3. Start the backend
 
 ```powershell
 python main.py
@@ -130,7 +122,7 @@ The backend runs at:
 http://127.0.0.1:8000
 ```
 
-### 5. Start the dashboard
+### 4. Start the dashboard
 
 ```powershell
 cd frontend
@@ -146,6 +138,10 @@ http://127.0.0.1:5173
 
 If your backend is not running on `127.0.0.1:8000`, set `VITE_API_BASE` before starting the frontend.
 
+### 5. Fill model settings from the dashboard
+
+Open the dashboard Settings page and fill `base_url`, `api_key`, and model name for `main_model`, `route_model`, and `multimodal_model`. The backend writes these values into `agent.config.md`.
+
 ## Configuration
 
 Runtime configuration lives in the fenced JSON block inside `agent.config.md`.
@@ -155,24 +151,24 @@ The LLM factory only keeps three model roles:
 ```json
 {
   "main_model": {
-    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "${MIMO_API_KEY}",
+    "base_url": "",
+    "api_key": "",
     "name": "mimo-v2.5-pro"
   },
   "route_model": {
-    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "${MIMO_API_KEY}",
+    "base_url": "",
+    "api_key": "",
     "name": "mimo-v2.5"
   },
   "multimodal_model": {
-    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "${MIMO_API_KEY}",
+    "base_url": "",
+    "api_key": "",
     "name": "mimo-v2-omni"
   }
 }
 ```
 
-You can also update model `base_url`, `api_key`, model name, temperature, and output token limits from the dashboard settings page.
+Model `base_url` and `api_key` are intentionally loaded from user input in the dashboard, not from environment variables. You can also update model name, temperature, and output token limits there.
 
 ## Memory System
 
@@ -298,27 +294,6 @@ asakud-agent/
 `-- meme/
 ```
 
-## Resume Highlights
-
-- Built a LangGraph-based local long-running Agent with memory, tool use, executable Skills, Style finalization, and async sub-agents.
-- Implemented a Playwright-based `fetch_web` sub-workflow that isolates search, browsing, extraction, and summarization from the main workflow to reduce context interference and token overhead.
-- Designed an executable Skill system where the main Agent routes tasks, SkillRunner reads `SKILL.md` and references, and scripts own `fetch_web/MCP` calls through a controlled runtime context.
-- Added an async `skill_builder` sub-agent with local templates to generate reusable Skill packages containing instructions, references, and optional executable scripts.
-- Implemented Redis hot memory, Markdown cold memory, and RECENT_SUMMARY compaction to balance personalization, persistence, and KV-cache friendliness.
-- Built a React dashboard for runtime status, Skill/Style uploads, MCP server management, and user-configurable LLM API settings.
-
-## Roadmap
-
-- Add stricter sandboxing for user-uploaded Skill scripts.
-- Add MCP connection health checks and per-server tool permissions.
-- Add dashboard views for memory events and Skill execution traces.
-- Add automated tests for workflow routing, memory compaction, and Skill execution.
-- Add Docker Compose for backend, frontend, Redis, and optional MCP gateway.
-
-## Notes
-
-Nginx is not required for local development. Use it only when deploying behind HTTPS, static-file serving, or reverse proxy rules.
-
 <p align="right">
   <a href="#asakud-agent">Back to top</a>
 </p>
@@ -423,21 +398,13 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 2. 配置环境变量
-
-```powershell
-$env:MIMO_API_KEY="your_api_key"
-```
-
-默认模型配置位于 `agent.config.md`。
-
-### 3. 初始化本地文件和数据库
+### 2. 初始化本地文件和数据库
 
 ```powershell
 python agent_loop\bootstrap.py
 ```
 
-### 4. 启动后端
+### 3. 启动后端
 
 ```powershell
 python main.py
@@ -449,7 +416,7 @@ python main.py
 http://127.0.0.1:8000
 ```
 
-### 5. 启动前端 Dashboard
+### 4. 启动前端 Dashboard
 
 ```powershell
 cd frontend
@@ -465,6 +432,10 @@ http://127.0.0.1:5173
 
 如果后端不在 `127.0.0.1:8000`，启动前端前请设置 `VITE_API_BASE`。
 
+### 5. 在 Dashboard 中填写模型设置
+
+打开 Dashboard 的 Settings 页面，为 `main_model`、`route_model` 和 `multimodal_model` 填写 `base_url`、`api_key` 和模型名。后端会把这些值写入 `agent.config.md`。
+
 ## 配置说明
 
 运行时配置位于 `agent.config.md` 的 fenced JSON 代码块中。
@@ -474,24 +445,24 @@ LLM 工厂只保留三个模型角色：
 ```json
 {
   "main_model": {
-    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "${MIMO_API_KEY}",
+    "base_url": "",
+    "api_key": "",
     "name": "mimo-v2.5-pro"
   },
   "route_model": {
-    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "${MIMO_API_KEY}",
+    "base_url": "",
+    "api_key": "",
     "name": "mimo-v2.5"
   },
   "multimodal_model": {
-    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "${MIMO_API_KEY}",
+    "base_url": "",
+    "api_key": "",
     "name": "mimo-v2-omni"
   }
 }
 ```
 
-你也可以在 Dashboard 设置页修改模型 `base_url`、`api_key`、模型名、温度和输出 token 限制。
+模型 `base_url` 和 `api_key` 会从 Dashboard 用户输入中载入，不再通过环境变量载入。你也可以在 Dashboard 设置页修改模型名、温度和输出 token 限制。
 
 ## 记忆系统
 
@@ -616,27 +587,6 @@ asakud-agent/
 |-- tools/
 `-- meme/
 ```
-
-## 简历亮点
-
-- 构建基于 LangGraph 的本地长期运行 Agent，集成记忆、工具调用、可执行 Skill、Style 终稿改写和异步子 Agent。
-- 实现基于 Playwright 的 `fetch_web` 子工作流，将搜索、浏览、提取和总结从主流程隔离，减少上下文干扰和 token 消耗。
-- 设计可执行 Skill 系统：主 Agent 负责任务路由，SkillRunner 阅读 `SKILL.md` 和 references，脚本通过受控 runtime context 调用 `fetch_web/MCP`。
-- 实现异步 `skill_builder` 子 Agent，结合本地模板生成包含说明、references 和可选脚本的可复用 Skill 包。
-- 实现 Redis 热记忆、Markdown 冷记忆和 RECENT_SUMMARY 压缩，在个性化、持久化和 KV-cache 友好之间取得平衡。
-- 构建 React Dashboard，支持运行状态查看、Skill/Style 上传、MCP Server 管理和用户可配置 LLM API。
-
-## 后续规划
-
-- 为用户上传的 Skill 脚本增加更严格的沙箱。
-- 增加 MCP 连接健康检查和按 Server 的工具权限控制。
-- 增加 Dashboard 中的记忆事件和 Skill 执行轨迹视图。
-- 增加工作流路由、记忆压缩和 Skill 执行的自动化测试。
-- 增加 Docker Compose，一键启动后端、前端、Redis 和可选 MCP 网关。
-
-## 说明
-
-本地开发不需要 Nginx。只有在需要 HTTPS、静态文件托管或反向代理规则时，才建议在部署环境中引入 Nginx。
 
 <p align="right">
   <a href="#asakud-agent">返回顶部</a>

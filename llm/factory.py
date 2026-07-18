@@ -30,10 +30,14 @@ def build_chat_model(
     if overrides:
         merged.update(overrides)
 
+    model_name = _required_model_value(merged, "name", model_key)
+    api_key = _required_model_value(merged, "api_key", model_key)
+    base_url = _required_model_value(merged, "base_url", model_key)
+
     return ChatOpenAI(
-        model=merged["name"],
-        api_key=merged["api_key"],
-        base_url=merged["base_url"],
+        model=model_name,
+        api_key=api_key,
+        base_url=base_url,
         temperature=merged.get("temperature", 0.2),
         max_tokens=merged.get("max_output_tokens"),
     )
@@ -45,3 +49,13 @@ def build_route_model(config: dict[str, Any], overrides: dict[str, Any] | None =
 
 def build_multimodal_model(config: dict[str, Any], overrides: dict[str, Any] | None = None) -> ChatOpenAI:
     return build_chat_model(config, model_key=MULTIMODAL_MODEL_KEY, overrides=overrides)
+
+
+def _required_model_value(config: dict[str, Any], field: str, model_key: str) -> str:
+    value = str(config.get(field, "") or "").strip()
+    if not value or (value.startswith("${") and value.endswith("}")):
+        raise ValueError(
+            f"Model configuration '{model_key}.{field}' is missing. "
+            "Please fill it from the dashboard Settings page."
+        )
+    return value
