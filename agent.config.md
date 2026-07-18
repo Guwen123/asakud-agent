@@ -1,4 +1,4 @@
-﻿# Sakuro Agent Config
+# Sakuro Agent Config
 
 The program reads the fenced `json` block below as its runtime configuration.
 
@@ -24,56 +24,14 @@ The program reads the fenced `json` block below as its runtime configuration.
     "reply_path": "/sendMessage",
     "report_format": "string"
   },
-  "model": {
+  "main_model": {
     "provider": "token-plan-cn",
     "protocol": "openai-compatible",
     "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
     "api_key": "${MIMO_API_KEY}",
     "name": "mimo-v2.5-pro",
     "temperature": 0.2,
-    "max_output_tokens": 4096,
-    "available_models": [
-      {
-        "name": "mimo-v2.5-pro",
-        "type": "chat",
-        "description": "Default chat model."
-      },
-      {
-        "name": "mimo-v2.5",
-        "type": "chat",
-        "description": "General-purpose chat model."
-      },
-      {
-        "name": "mimo-v2-pro",
-        "type": "chat",
-        "description": "Alternate high-performance chat model."
-      },
-      {
-        "name": "mimo-v2-omni",
-        "type": "omni",
-        "description": "Multimodal model."
-      },
-      {
-        "name": "mimo-v2.5-tts",
-        "type": "tts",
-        "description": "Text-to-speech model."
-      },
-      {
-        "name": "mimo-v2.5-tts-voiceclone",
-        "type": "tts",
-        "description": "Voice-clone TTS model."
-      },
-      {
-        "name": "mimo-v2.5-tts-voicedesign",
-        "type": "tts",
-        "description": "Voice-design TTS model."
-      },
-      {
-        "name": "mimo-v2-tts",
-        "type": "tts",
-        "description": "Legacy TTS model."
-      }
-    ]
+    "max_output_tokens": 4096
   },
   "route_model": {
     "provider": "token-plan-cn",
@@ -255,7 +213,9 @@ The program reads the fenced `json` block below as its runtime configuration.
   },
   "skill_builder": {
     "temperature": 0.0,
-    "max_output_tokens": 4096
+    "max_output_tokens": 4096,
+    "templates_dir": "skills/_templates",
+    "max_template_chars": 6000
   },
   "meme": {
     "metadata_path": "meme/memes.json",
@@ -265,25 +225,18 @@ The program reads the fenced `json` block below as its runtime configuration.
   },
   "mcp": {
     "enabled": false,
+    "default_server": "",
+    "use_default_server": false,
     "servers": [
       {
-        "name": "github",
+        "name": "local-mcp-example",
         "enabled": false,
-        "base_url": "https://your-github-mcp-server.example.com",
-        "timeout_seconds": 30,
-        "headers": {
-          "Authorization": "Bearer YOUR_MCP_SERVER_TOKEN"
-        },
-        "source_repo": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
-        "list_tools_request": {
-          "method": "GET",
-          "path": "/tools"
-        },
-        "call_tool_request": {
-          "method": "POST",
-          "path": "/tools/call"
-        },
-        "notes": "Example config for a GitHub MCP server from Awesome MCP Servers / official MCP server implementations. base_url should point to your deployed HTTP gateway endpoint, not the repository URL."
+        "base_url": "http://127.0.0.1:9000",
+        "transport": "mcp-jsonrpc",
+        "endpoint": "/mcp",
+        "timeout_seconds": 5,
+        "headers": {},
+        "notes": "Disabled example only. Enable it only after you start a real MCP HTTP / Streamable HTTP gateway on this address, or add a real server from the dashboard."
       }
     ]
   },

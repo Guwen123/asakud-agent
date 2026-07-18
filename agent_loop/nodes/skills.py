@@ -16,7 +16,7 @@ from skill_runner import SkillRunnerAgent
 
 from ..background import enqueue_skill_build
 from ..config_loader import load_config, project_path
-from ..models.factory import build_route_model
+from llm.factory import build_route_model
 from prompts.skills import SKILL_ROUTER_PROMPT
 
 SKILL_CONFIG_PATTERN = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
@@ -94,8 +94,10 @@ def build_skill_runner_tool(config: dict | None = None) -> BaseTool | None:
         description=(
             "Run one executable skill package by id. Use this when the user's task matches a listed skill. "
             "You may call this tool multiple times when a task genuinely needs multiple skills, then combine "
-            "the returned results yourself before final answering. The skill sub-agent can use enabled tools "
-            "such as fetch_web when the skill needs external information.\n\n"
+            "the returned results yourself before final answering. For scripted skills, the skill sub-agent "
+            "first reads SKILL.md and references, then decides whether to call the script; any fetch_web/MCP "
+            "calls are owned by that script through its runtime context. For non-script skills, the sub-agent "
+            "may use enabled project tools directly when the skill package requires external information.\n\n"
             f"Available executable skills:\n{available_skills}"
         ),
     )

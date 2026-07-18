@@ -9,7 +9,7 @@ from memory.markdown import parse_markdown_entries, render_prompt_entries
 from memory.router import route_markdown_entry_ids, route_markdown_ids
 
 from ..config_loader import load_config, project_path
-from ..models.factory import build_route_model
+from llm.factory import build_route_model
 
 
 def get_md_memory_node(config: dict | None = None) -> Runnable:

@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent_loop.config_loader import project_path
-from agent_loop.models.factory import build_chat_model
+from llm.factory import build_chat_model
 from prompts.summary import RECENT_SUMMARY_PROMPT
 
 
@@ -20,6 +20,7 @@ DEFAULT_RECENT_SUMMARY_PATH = "memory/RECENT_SUMMARY.md"
 class RecentSummaryUpdate:
     path: str
     token_count: int
+    line_count: int
     compacted: bool
     error: str = ""
 
@@ -35,18 +36,22 @@ def append_recent_summary_turn(
 
     existing = path.read_text(encoding="utf-8") if path.exists() else _default_summary_text()
     updated = _append_turn(existing, user_input=user_input, assistant_output=assistant_output)
-    max_tokens = _safe_int(summary_cfg.get("max_tokens"), 1800)
     token_count = estimate_tokens(updated)
+    line_count = count_lines(updated)
+    max_tokens = _safe_int(summary_cfg.get("max_tokens"), 1800)
     if max_tokens <= 0 or token_count <= max_tokens:
         path.write_text(updated, encoding="utf-8")
-        return RecentSummaryUpdate(path=str(path), token_count=token_count, compacted=False)
+        return RecentSummaryUpdate(path=str(path), token_count=token_count, line_count=line_count, compacted=False)
 
     try:
-        compacted_text = _compact_summary(config, updated, target_tokens=_safe_int(summary_cfg.get("target_tokens"), 900))
+        target_tokens = _safe_int(summary_cfg.get("target_tokens"), 900)
+        compacted_text = _compact_summary(config, updated, target_tokens=target_tokens)
         path.write_text(_render_compacted_summary(compacted_text), encoding="utf-8")
+        rendered = _render_compacted_summary(compacted_text)
         return RecentSummaryUpdate(
             path=str(path),
-            token_count=estimate_tokens(compacted_text),
+            token_count=estimate_tokens(rendered),
+            line_count=count_lines(rendered),
             compacted=True,
         )
     except Exception as exc:
@@ -54,6 +59,7 @@ def append_recent_summary_turn(
         return RecentSummaryUpdate(
             path=str(path),
             token_count=token_count,
+            line_count=line_count,
             compacted=False,
             error=f"{type(exc).__name__}: {exc}",
         )
@@ -66,10 +72,17 @@ def load_recent_summary(config: dict[str, Any]) -> str:
     text = path.read_text(encoding="utf-8").strip()
     if not text or text == _default_summary_text().strip():
         return ""
-    max_chars = _safe_int(_summary_config(config).get("prompt_max_chars"), 4000)
-    if max_chars > 0 and len(text) > max_chars:
-        return text[-max_chars:].strip()
+    prompt_max_chars = _safe_int(_summary_config(config).get("prompt_max_chars"), 4000)
+    if prompt_max_chars > 0 and len(text) > prompt_max_chars:
+        return text[-prompt_max_chars:].strip()
     return text
+
+
+def count_lines(value: str) -> int:
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    return len(text.splitlines())
 
 
 def estimate_tokens(value: str) -> int:

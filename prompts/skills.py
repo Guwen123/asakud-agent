@@ -27,6 +27,7 @@ You will receive:
 3. the assistant's final output
 4. the existing local skills, each with only id and summary
 5. the enabled tools that future skill runs may use
+6. local skill templates that show the required SKILL.md, skill.json, reference, and script style
 
 Return JSON only:
 {
@@ -62,8 +63,11 @@ Rules:
 - `tools` must only contain names from enabled tools. Use `fetch_web` when the skill needs live web search or page interaction.
 - `skill_markdown` must be a standalone SKILL.md body in Chinese with sections: 适用场景, 输入, 工作流程, 可用工具, 输出格式, 验证.
 - Add `references` for durable domain notes, selectors, source rules, prompt examples, or task-specific playbooks.
-- Add `scripts` only when deterministic local code is genuinely useful. Prefer no script for web browsing tasks; let the skill runner use tools instead.
-- If you add a script entry, it must define `run(context: dict) -> dict` and return at least `{"output": "..."}`.
+- Use `skill_templates` as format and interface examples. Do not copy template ids directly; adapt the template to the new reusable task.
+- Add `scripts` when deterministic orchestration is genuinely useful, including reusable web-search workflows.
+- If a script needs live web, MCP, or external tool capabilities, encapsulate that workflow by calling `context["run_tool"]("tool_name", {...})`; do not import networking/browser libraries directly.
+- For generated web-search scripts, include `"fetch_web"` in `tools` and put the `context["run_tool"]("fetch_web", {...})` call inside the script so generated and uploaded executable skills share the same script interface.
+- If you add a script entry, it must define `run(context: dict) -> dict` and return at least `{"output": "..."}`. The context provides `user_input`, `recent_summary`, `skill`, `skill_bundle`, `tools`, and `run_tool`.
 - `entry` must be empty unless a valid script is provided. If provided, use `scripts/entry.py:run`.
 - If no skill should be created, return save_skill=false and leave the other fields empty.
 """

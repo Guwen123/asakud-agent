@@ -8,7 +8,7 @@ from langchain_core.runnables import Runnable, RunnableLambda
 
 from tools.registry import ToolRegistry
 
-from ..models.factory import build_chat_model
+from llm.factory import build_chat_model
 from prompts.system import build_hot_memory_system_prompt, build_static_system_prompt
 from .memory import get_md_memory_node
 from .meme import get_print_meme_node, get_router_meme_node

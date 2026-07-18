@@ -1,0 +1,10 @@
+{
+  "id": "web-search-template",
+  "summary": "网页检索类可执行 skill 模板，演示如何在脚本中通过 context.run_tool 调用 fetch_web。",
+  "type": "workflow",
+  "tools": ["fetch_web"],
+  "entry": "scripts/entry.py:run",
+  "references": ["reference/query_rules.md"],
+  "max_steps": 8,
+  "template": true
+}

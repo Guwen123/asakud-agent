@@ -8,7 +8,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
 from agent_loop.config_loader import load_config
-from agent_loop.models.factory import build_route_model
+from llm.factory import build_route_model
 
 from .tools import open_page, click_element, get_page_content, extract_info
 

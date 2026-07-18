@@ -13,6 +13,7 @@ import zipfile
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
@@ -21,10 +22,11 @@ from pydantic import BaseModel
 
 from agent_loop.background import start_background_workers, stop_background_workers
 from agent_loop.bootstrap import bootstrap
-from agent_loop.config_loader import load_config, project_path
+from agent_loop.config_loader import load_config, load_raw_config, project_path
 from agent_loop.loop import run_agent_once_async
 from agent_loop.nodes.skills import load_skill_registry, write_skill_registry
 from agent_loop.scheduler import MarkdownTaskScheduler
+from tools.mcp.factory import DEFAULT_MCP_SERVER, configured_mcp_servers, list_mcp_server_tools
 
 
 class SendMessageRequest(BaseModel):
@@ -33,6 +35,35 @@ class SendMessageRequest(BaseModel):
     group_id: int | None = None
     message: str
     image_ref: str | None = None
+
+
+class MCPServerRequest(BaseModel):
+    name: str = "local"
+    base_url: str
+    enabled: bool = True
+    transport: str = "mcp-jsonrpc"
+    endpoint: str | None = None
+    timeout_seconds: float = 5.0
+    authorization: str | None = None
+    headers: dict[str, str] | None = None
+    tools_path: str | None = None
+    call_path: str | None = None
+
+
+class LLMModelConfigRequest(BaseModel):
+    provider: str = "custom"
+    protocol: str = "openai-compatible"
+    base_url: str
+    api_key: str
+    name: str
+    temperature: float = 0.0
+    max_output_tokens: int = 2048
+
+
+class LLMSettingsRequest(BaseModel):
+    main_model: LLMModelConfigRequest
+    route_model: LLMModelConfigRequest
+    multimodal_model: LLMModelConfigRequest
 
 
 async def scheduled_task_loop(app: FastAPI) -> None:
@@ -133,6 +164,7 @@ async def dashboard_status() -> dict[str, Any]:
     config = app.state.config
     skills = load_skill_registry(config)
     styles = _list_styles(config)
+    mcp_servers = _list_mcp_servers(config)
     return {
         "ok": True,
         "agent": {
@@ -151,8 +183,40 @@ async def dashboard_status() -> dict[str, Any]:
             "tools": config.get("tools", {}).get("enabled", []),
             "skill_count": len(skills),
             "style_count": len(styles),
+            "mcp": bool(config.get("mcp", {}).get("enabled", False)),
+            "mcp_server_count": len(mcp_servers),
         },
         "computer": _computer_status(),
+    }
+
+
+@app.get("/api/dashboard/models")
+async def dashboard_models() -> dict[str, Any]:
+    raw_config = load_raw_config()
+    return {
+        "ok": True,
+        "models": {
+            key: _model_config_payload(raw_config, key)
+            for key in _model_config_keys()
+        },
+    }
+
+
+@app.put("/api/dashboard/models")
+async def update_dashboard_models(request: LLMSettingsRequest) -> dict[str, Any]:
+    raw_config = load_raw_config()
+    raw_config.pop("model", None)
+    for key in _model_config_keys():
+        raw_config[key] = _normalize_model_config(getattr(request, key), previous=raw_config.get(key, {}))
+    _write_runtime_config(raw_config)
+    app.state.config = load_config()
+    app.state.background_workers = start_background_workers(app.state.config)
+    return {
+        "ok": True,
+        "models": {
+            key: _model_config_payload(raw_config, key)
+            for key in _model_config_keys()
+        },
     }
 
 
@@ -191,6 +255,47 @@ async def upload_style_package(file: UploadFile = File(...)) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "style": style}
+
+
+@app.get("/api/dashboard/mcp")
+async def dashboard_mcp() -> dict[str, Any]:
+    config = app.state.config
+    mcp_cfg = config.get("mcp", {}) if isinstance(config.get("mcp", {}), dict) else {}
+    return {
+        "ok": True,
+        "enabled": bool(mcp_cfg.get("enabled", False)),
+        "default_server": str(mcp_cfg.get("default_server", "local") or "local"),
+        "servers": _list_mcp_servers(config),
+    }
+
+
+@app.post("/api/dashboard/mcp/servers")
+async def add_mcp_server(request: MCPServerRequest) -> dict[str, Any]:
+    raw_config = load_raw_config()
+    try:
+        server = _upsert_mcp_server(raw_config, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _write_runtime_config(raw_config)
+    app.state.config = load_config()
+    tool_probe = await asyncio.to_thread(_probe_mcp_server_tools, server)
+    return {
+        "ok": True,
+        "server": _mcp_server_payload(server),
+        "tools": tool_probe.get("tools", []),
+        "probe_error": tool_probe.get("error", ""),
+    }
+
+
+@app.get("/api/dashboard/mcp/servers/{server_name}/tools")
+async def dashboard_mcp_server_tools(server_name: str) -> dict[str, Any]:
+    server = _find_mcp_server(app.state.config, server_name)
+    if server is None:
+        raise HTTPException(status_code=404, detail="MCP server not found.")
+    tool_probe = await asyncio.to_thread(_probe_mcp_server_tools, server)
+    if tool_probe.get("error"):
+        return {"ok": False, "server": _mcp_server_payload(server), "tools": [], "error": tool_probe["error"]}
+    return {"ok": True, "server": _mcp_server_payload(server), "tools": tool_probe.get("tools", [])}
 
 
 async def _execute_scheduled_task(app: FastAPI, task_content: str) -> None:
@@ -332,6 +437,199 @@ def _skill_payload(item: dict[str, Any]) -> dict[str, Any]:
         "entry": str(item.get("entry", "") or ""),
         "max_steps": item.get("max_steps", 8),
     }
+
+
+def _model_config_keys() -> tuple[str, str, str]:
+    return ("main_model", "route_model", "multimodal_model")
+
+
+def _model_config_payload(config: dict[str, Any], key: str) -> dict[str, Any]:
+    value = config.get(key)
+    if key == "main_model" and not isinstance(value, dict):
+        value = config.get("model")
+    model = value if isinstance(value, dict) else {}
+    return {
+        "provider": str(model.get("provider", "custom") or "custom"),
+        "protocol": str(model.get("protocol", "openai-compatible") or "openai-compatible"),
+        "base_url": str(model.get("base_url", "") or ""),
+        "api_key": str(model.get("api_key", "") or ""),
+        "name": str(model.get("name", "") or ""),
+        "temperature": _safe_float(model.get("temperature"), 0.0),
+        "max_output_tokens": _safe_int(model.get("max_output_tokens"), 2048),
+    }
+
+
+def _normalize_model_config(request: LLMModelConfigRequest, *, previous: Any) -> dict[str, Any]:
+    previous_config = previous if isinstance(previous, dict) else {}
+    base_url = str(request.base_url or "").strip().rstrip("/")
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Model base_url must be an http(s) URL.")
+
+    name = str(request.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Model name is required.")
+
+    api_key = str(request.api_key or "").strip()
+    if not api_key:
+        api_key = str(previous_config.get("api_key", "") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Model api_key is required.")
+
+    return {
+        "provider": str(request.provider or "custom").strip() or "custom",
+        "protocol": str(request.protocol or "openai-compatible").strip() or "openai-compatible",
+        "base_url": base_url,
+        "api_key": api_key,
+        "name": name,
+        "temperature": _safe_float(request.temperature, 0.0),
+        "max_output_tokens": max(_safe_int(request.max_output_tokens, 2048), 1),
+    }
+
+
+def _list_mcp_servers(config: dict[str, Any]) -> list[dict[str, Any]]:
+    return [_mcp_server_payload(server) for server in configured_mcp_servers(config)]
+
+
+def _mcp_server_payload(server: dict[str, Any]) -> dict[str, Any]:
+    headers = server.get("headers", {})
+    list_req = server.get("list_tools_request", {})
+    call_req = server.get("call_tool_request", {})
+    tools_path = str(server.get("tools_path", "") or "")
+    call_path = str(server.get("call_path", "") or "")
+    if not tools_path and isinstance(list_req, dict):
+        tools_path = str(list_req.get("path", "") or "")
+    if not call_path and isinstance(call_req, dict):
+        call_path = str(call_req.get("path", "") or "")
+    return {
+        "name": _slugify(str(server.get("name", "") or "local")) or "local",
+        "enabled": bool(server.get("enabled", True)),
+        "base_url": str(server.get("base_url", "") or ""),
+        "transport": str(server.get("transport", "mcp-jsonrpc") or "mcp-jsonrpc"),
+        "endpoint": str(server.get("endpoint", "") or ""),
+        "timeout_seconds": float(server.get("timeout_seconds", 10) or 10),
+        "tools_path": tools_path,
+        "call_path": call_path,
+        "has_auth": bool(isinstance(headers, dict) and headers.get("Authorization")),
+        "notes": str(server.get("notes", "") or ""),
+    }
+
+
+def _upsert_mcp_server(config: dict[str, Any], request: MCPServerRequest) -> dict[str, Any]:
+    mcp_cfg = config.setdefault("mcp", {})
+    if not isinstance(mcp_cfg, dict):
+        raise ValueError("mcp config must be an object.")
+    servers = mcp_cfg.setdefault("servers", [])
+    if not isinstance(servers, list):
+        servers = []
+        mcp_cfg["servers"] = servers
+
+    server_name = _slugify(request.name) or "local"
+    transport = _normalize_mcp_transport(request.transport)
+    base_url, endpoint = _normalize_mcp_url(request.base_url, request.endpoint, transport)
+    headers = {str(key): str(value) for key, value in (request.headers or {}).items() if str(key).strip()}
+    auth_header = _authorization_header(request.authorization)
+    if auth_header:
+        headers["Authorization"] = auth_header
+
+    server: dict[str, Any] = {
+        "name": server_name,
+        "enabled": bool(request.enabled),
+        "base_url": base_url,
+        "transport": transport,
+        "endpoint": endpoint,
+        "timeout_seconds": max(float(request.timeout_seconds or 5.0), 1.0),
+        "headers": headers,
+    }
+    if transport == "simple-http":
+        server["list_tools_request"] = {
+            "method": "GET",
+            "path": _normalize_api_path(request.tools_path or "/tools"),
+        }
+        server["call_tool_request"] = {
+            "method": "POST",
+            "path": _normalize_api_path(request.call_path or "/tools/call"),
+        }
+
+    updated = False
+    for index, item in enumerate(servers):
+        if not isinstance(item, dict):
+            continue
+        if _slugify(str(item.get("name", "") or "")) == server_name:
+            servers[index] = server
+            updated = True
+            break
+    if not updated:
+        servers.append(server)
+
+    mcp_cfg["enabled"] = True
+    mcp_cfg["default_server"] = str(mcp_cfg.get("default_server", server_name) or server_name)
+    tools_cfg = config.setdefault("tools", {})
+    enabled_tools = tools_cfg.setdefault("enabled", [])
+    if not isinstance(enabled_tools, list):
+        enabled_tools = []
+        tools_cfg["enabled"] = enabled_tools
+    if "mcp" not in enabled_tools:
+        enabled_tools.append("mcp")
+    if "fetch_web" not in enabled_tools:
+        enabled_tools.insert(0, "fetch_web")
+    return server
+
+
+def _find_mcp_server(config: dict[str, Any], server_name: str) -> dict[str, Any] | None:
+    normalized = _slugify(server_name)
+    for server in configured_mcp_servers(config):
+        if _slugify(str(server.get("name", "") or "")) == normalized:
+            return server
+    return None
+
+
+def _probe_mcp_server_tools(server: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return {"tools": list_mcp_server_tools(server)}
+    except Exception as exc:
+        return {"tools": [], "error": str(exc)}
+
+
+def _normalize_mcp_transport(value: str) -> str:
+    text = str(value or "mcp-jsonrpc").strip().lower().replace("_", "-")
+    if text in {"jsonrpc", "mcp", "streamable-http", "streamable"}:
+        return "mcp-jsonrpc"
+    if text in {"simple", "simple-http", "rest"}:
+        return "simple-http"
+    return "mcp-jsonrpc"
+
+
+def _normalize_mcp_url(raw_url: str, raw_endpoint: str | None, transport: str) -> tuple[str, str]:
+    raw = str(raw_url or "").strip()
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("MCP base_url must be an http(s) URL.")
+    base_url = urlunparse((parsed.scheme, parsed.netloc, "", "", "", "")).rstrip("/")
+    path_from_url = parsed.path.strip()
+    if raw_endpoint is not None and str(raw_endpoint).strip():
+        endpoint = _normalize_api_path(str(raw_endpoint))
+    elif path_from_url and path_from_url != "/":
+        endpoint = _normalize_api_path(path_from_url)
+    elif transport == "mcp-jsonrpc":
+        endpoint = "/mcp"
+    else:
+        endpoint = ""
+    return base_url, endpoint
+
+
+def _normalize_api_path(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text if text.startswith("/") else f"/{text}"
+
+
+def _authorization_header(value: str | None) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text if text.lower().startswith("bearer ") else f"Bearer {text}"
 
 
 def _read_style_registry(config: dict[str, Any]) -> dict[str, Any]:
@@ -582,9 +880,13 @@ def _extract_text(message: Any) -> str:
             if seg.get("type") == "text" and isinstance(data, dict):
                 chunks.append(str(data.get("text", "")))
             elif seg.get("type") == "image" and isinstance(data, dict):
-                url = str(data.get("url", "") or data.get("file", "")).strip()
-                if url:
-                    chunks.append(f"[CQ:image,url={url}]")
+                attrs: list[str] = []
+                for key in ("url", "file", "path", "file_path"):
+                    value = str(data.get(key, "") or "").strip()
+                    if value:
+                        attrs.append(f"{key}={value}")
+                if attrs:
+                    chunks.append(f"[CQ:image,{','.join(attrs)}]")
         return "".join(chunks)
     return str(message or "")
 
@@ -705,6 +1007,20 @@ def _to_optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 if __name__ == "__main__":

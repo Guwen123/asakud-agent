@@ -10,13 +10,14 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable, RunnableLambda
 
 from ..config_loader import load_config, project_path
-from ..models.factory import build_chat_model, build_multimodal_model
+from llm.factory import build_chat_model, build_multimodal_model
 from prompts.meme import MEME_PICKER_PROMPT, MEME_VISION_PROMPT
 
 CQ_IMAGE_RE = re.compile(r"\[CQ:image,([^\]]+)\]")
@@ -24,6 +25,8 @@ MEME_ACTION_KEYWORDS = ["\u8bbe\u7f6e\u8868\u60c5\u5305", "\u6dfb\u52a0\u8868\u6
 NAME_SPLITTERS = ["\u53eb", "\u53eb\u505a", "\u547d\u540d\u4e3a", "\u53d6\u540d\u4e3a"]
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 DEFAULT_EMOTION = "\u56fe\u7247\u8868\u60c5"
+IMAGE_REF_KEYS = ("url", "path", "file_path", "file")
+MAX_DEBUG_TEXT_CHARS = 500
 
 
 def get_router_meme_node(config: dict | None = None) -> Runnable:
@@ -35,7 +38,6 @@ def get_router_meme_node(config: dict | None = None) -> Runnable:
 
     def _run(state: dict[str, Any]) -> dict[str, Any]:
         raw_input = str(state.get("user_input", "") or "")
-        print(raw_input)
         image_refs = _extract_image_refs(raw_input)
         if not image_refs:
             return state
@@ -46,6 +48,7 @@ def get_router_meme_node(config: dict | None = None) -> Runnable:
             multimodal_model=multimodal_model,
             image_ref=image_ref,
             user_text=cleaned_text,
+            config=cfg,
         )
 
         explicit_name = _extract_explicit_meme_name(cleaned_text)
@@ -56,7 +59,7 @@ def get_router_meme_node(config: dict | None = None) -> Runnable:
             meme_name = explicit_name or f"auto_{uuid.uuid4().hex[:6]}"
             try:
                 saved_entry = save_meme_reference(
-                    image_ref=image_ref,
+                    image_ref=_resolve_storable_image_ref(image_ref, cfg),
                     config=cfg,
                     name=meme_name,
                     emotion=emotion,
@@ -267,32 +270,76 @@ def _analyze_image_emotion(
     multimodal_model: Runnable,
     image_ref: str,
     user_text: str,
+    config: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, str]]:
-    image_url = _to_model_image_url(image_ref)
+    image_url, image_debug = _to_model_image_url(image_ref, config=config)
     if not image_url:
-        return DEFAULT_EMOTION, {"source": "default", "reason": "image_url_unavailable"}
+        return DEFAULT_EMOTION, _debug_payload(
+            "default",
+            "image_url_unavailable",
+            image_debug,
+        )
 
     try:
         prompt_text = user_text or "Please identify the meme emotion in one short Chinese phrase."
-        response = multimodal_model.invoke(
-            [
-                SystemMessage(content=MEME_VISION_PROMPT),
-                HumanMessage(
-                    content=[
-                        {"type": "text", "text": f"User text: {prompt_text}"},
-                        {"type": "image_url", "image_url": {"url": image_url}},
-                    ]
-                ),
-            ]
+        response, message_format = _invoke_multimodal_model(
+            multimodal_model=multimodal_model,
+            prompt_text=prompt_text,
+            image_url=image_url,
         )
-        payload = _parse_json(_extract_text(response))
+        raw_response = _extract_text(response)
+        payload = _parse_json(raw_response)
         emotion = str(payload.get("emotion", "") or "").strip()
         if emotion:
-            return emotion, {"source": "multimodal", "reason": "model_json"}
+            return emotion, _debug_payload(
+                "multimodal",
+                "model_json",
+                image_debug,
+                message_format=message_format,
+            )
     except Exception as exc:
-        return DEFAULT_EMOTION, {"source": "default", "reason": f"multimodal_error:{type(exc).__name__}"}
+        return DEFAULT_EMOTION, _debug_payload(
+            "default",
+            f"multimodal_error:{type(exc).__name__}",
+            image_debug,
+            error=str(exc),
+        )
 
-    return DEFAULT_EMOTION, {"source": "default", "reason": "empty_multimodal_result"}
+    return DEFAULT_EMOTION, _debug_payload(
+        "default",
+        "empty_multimodal_result",
+        image_debug,
+        raw_response=raw_response,
+    )
+
+
+def _invoke_multimodal_model(
+    multimodal_model: Runnable,
+    prompt_text: str,
+    image_url: str,
+) -> tuple[Any, str]:
+    standard_messages = [
+        SystemMessage(content=MEME_VISION_PROMPT),
+        HumanMessage(
+            content=[
+                {"type": "text", "text": f"User text: {prompt_text}"},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ]
+        ),
+    ]
+    try:
+        return multimodal_model.invoke(standard_messages), "openai_url_object"
+    except Exception:
+        flat_messages = [
+            SystemMessage(content=MEME_VISION_PROMPT),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": f"User text: {prompt_text}"},
+                    {"type": "image_url", "image_url": image_url},
+                ]
+            ),
+        ]
+        return multimodal_model.invoke(flat_messages), "flat_image_url"
 
 
 def _extract_explicit_meme_name(text: str) -> str:
@@ -313,9 +360,10 @@ def _extract_image_refs(text: str) -> list[str]:
     refs: list[str] = []
     for match in CQ_IMAGE_RE.finditer(text):
         attrs = _parse_cq_attrs(match.group(1))
-        image_ref = attrs.get("url") or attrs.get("file") or ""
-        if image_ref:
-            refs.append(html.unescape(image_ref).strip())
+        for key in IMAGE_REF_KEYS:
+            image_ref = _normalize_image_ref(attrs.get(key, ""))
+            if image_ref and image_ref not in refs:
+                refs.append(image_ref)
     return refs
 
 
@@ -345,14 +393,124 @@ def _resolve_meme_paths(config: dict[str, Any]) -> tuple[Path, Path]:
     return metadata_path, image_dir
 
 
-def _to_model_image_url(image_ref: str) -> str:
-    if image_ref.startswith(("http://", "https://", "data:")):
+def _to_model_image_url(
+    image_ref: str,
+    config: dict[str, Any] | None = None,
+    *,
+    allow_napcat_lookup: bool = True,
+) -> tuple[str, dict[str, str]]:
+    normalized_ref = _normalize_image_ref(image_ref)
+    if not normalized_ref:
+        return "", {"image_source": "empty"}
+
+    if normalized_ref.startswith(("http://", "https://")):
+        return normalized_ref, {"image_source": "remote_url"}
+
+    if normalized_ref.startswith("data:"):
+        return normalized_ref, {"image_source": "data_url"}
+
+    if normalized_ref.startswith("base64://"):
+        encoded = normalized_ref.removeprefix("base64://").strip()
+        if encoded:
+            return f"data:image/png;base64,{encoded}", {"image_source": "cq_base64"}
+        return "", {"image_source": "invalid_cq_base64"}
+
+    path = _resolve_existing_image_path(normalized_ref)
+    if path is not None:
+        return _local_image_to_data_url(path), {
+            "image_source": "local_file",
+            "resolved_path": str(path.resolve()).replace("\\", "/"),
+        }
+
+    if allow_napcat_lookup and config is not None:
+        resolved_ref = _resolve_napcat_image_ref(normalized_ref, config)
+        if resolved_ref and resolved_ref != normalized_ref:
+            resolved_url, resolved_debug = _to_model_image_url(
+                resolved_ref,
+                config=None,
+                allow_napcat_lookup=False,
+            )
+            if resolved_url:
+                resolved_debug["napcat_ref"] = _short_debug(normalized_ref)
+                return resolved_url, resolved_debug
+
+    return "", {
+        "image_source": "unresolved",
+        "image_ref": _short_debug(normalized_ref),
+    }
+
+
+def _resolve_storable_image_ref(
+    image_ref: str,
+    config: dict[str, Any],
+    *,
+    allow_napcat_lookup: bool = True,
+) -> str:
+    normalized_ref = _normalize_image_ref(image_ref)
+    if not normalized_ref:
         return image_ref
+    if normalized_ref.startswith(("http://", "https://")):
+        return normalized_ref
 
-    path = Path(image_ref)
-    if not path.exists():
+    path = _resolve_existing_image_path(normalized_ref)
+    if path is not None:
+        return str(path.resolve()).replace("\\", "/")
+
+    if not allow_napcat_lookup:
+        return normalized_ref
+
+    resolved_ref = _resolve_napcat_image_ref(normalized_ref, config)
+    if resolved_ref and resolved_ref != normalized_ref:
+        return _resolve_storable_image_ref(
+            resolved_ref,
+            config,
+            allow_napcat_lookup=False,
+        )
+    return resolved_ref or normalized_ref
+
+
+def _normalize_image_ref(value: str) -> str:
+    raw = html.unescape(str(value or "").strip())
+    if not raw:
         return ""
+    return unquote(raw).strip()
 
+
+def _resolve_existing_image_path(image_ref: str) -> Path | None:
+    candidates: list[Path] = []
+    normalized_ref = _normalize_file_url_path(image_ref)
+    for value in _dedupe_strings([image_ref, normalized_ref]):
+        if not value:
+            continue
+        raw_path = Path(value)
+        candidates.append(raw_path)
+        if not raw_path.is_absolute():
+            candidates.append(project_path(value))
+
+    for path in candidates:
+        if not path.exists() or not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix in ALLOWED_EXTENSIONS:
+            return path
+    return None
+
+
+def _normalize_file_url_path(image_ref: str) -> str:
+    if not image_ref.lower().startswith("file://"):
+        return image_ref
+    parsed = urlparse(image_ref)
+    path = unquote(parsed.path or "")
+    if parsed.netloc and not path:
+        path = parsed.netloc
+    elif parsed.netloc:
+        path = f"//{parsed.netloc}{path}"
+    if re.match(r"^/[A-Za-z]:/", path):
+        path = path[1:]
+    return path.replace("/", "\\") if re.match(r"^[A-Za-z]:/", path) else path
+
+
+def _local_image_to_data_url(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         return ""
@@ -360,6 +518,70 @@ def _to_model_image_url(image_ref: str) -> str:
     mime_type = mimetypes.guess_type(path.name)[0] or "image/png"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def _resolve_napcat_image_ref(image_ref: str, config: dict[str, Any]) -> str:
+    napcat_cfg = config.get("napcat", {})
+    if not napcat_cfg.get("enabled", False):
+        return ""
+    base_url = str(napcat_cfg.get("http_url", "") or "").rstrip("/")
+    if not base_url:
+        return ""
+
+    headers: dict[str, str] = {}
+    token = str(napcat_cfg.get("token", "") or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        with httpx.Client(base_url=base_url, timeout=5.0, headers=headers) as client:
+            response = client.post("/get_image", json={"file": image_ref})
+            response.raise_for_status()
+            payload = response.json() if response.content else {}
+    except Exception:
+        return ""
+
+    data = payload.get("data", payload) if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        return ""
+
+    for key in IMAGE_REF_KEYS:
+        resolved = _normalize_image_ref(str(data.get(key, "") or ""))
+        if resolved:
+            return resolved
+    return ""
+
+
+def _debug_payload(
+    source: str,
+    reason: str,
+    image_debug: dict[str, str] | None = None,
+    **extra: Any,
+) -> dict[str, str]:
+    payload: dict[str, str] = {"source": source, "reason": reason}
+    for key, value in (image_debug or {}).items():
+        if value:
+            payload[key] = _short_debug(value)
+    for key, value in extra.items():
+        text = _short_debug(value)
+        if text:
+            payload[key] = text
+    return payload
+
+
+def _short_debug(value: Any) -> str:
+    text = str(value or "").strip()
+    if len(text) <= MAX_DEBUG_TEXT_CHARS:
+        return text
+    return text[: MAX_DEBUG_TEXT_CHARS - 3].rstrip() + "..."
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+    return result
 
 
 def _normalize_name(name: str) -> str:

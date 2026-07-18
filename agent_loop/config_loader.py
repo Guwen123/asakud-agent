@@ -20,20 +20,26 @@ def project_path(value: str | Path) -> Path:
     return ROOT / path
 
 
-def load_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
+def load_config(config_path: str | Path = DEFAULT_CONFIG_PATH, *, expand_env: bool = True) -> dict[str, Any]:
     path = project_path(config_path)
     text = path.read_text(encoding="utf-8")
 
     if path.suffix.lower() == ".json":
-        return _expand_env(json.loads(text))
+        data = json.loads(text)
+        return _expand_env(data) if expand_env else data
 
     if path.suffix.lower() == ".md":
         match = CONFIG_BLOCK_PATTERN.search(text)
         if not match:
             raise ValueError(f"No fenced json config block found in {path}")
-        return _expand_env(json.loads(match.group(1)))
+        data = json.loads(match.group(1))
+        return _expand_env(data) if expand_env else data
 
     raise ValueError(f"Unsupported config file type: {path.suffix}")
+
+
+def load_raw_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
+    return load_config(config_path, expand_env=False)
 
 
 def _expand_env(value: Any) -> Any:

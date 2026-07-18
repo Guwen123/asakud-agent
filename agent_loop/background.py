@@ -40,6 +40,10 @@ class BackgroundWorkerManager:
             asyncio.create_task(self._run_skill_builder(), name="skill_builder"),
         ]
 
+    def update_config(self, config: dict[str, Any]) -> None:
+        self.config = config
+        self.hot_store = get_hot_store(config)
+
     async def stop(self) -> None:
         self._stop = True
         for task in self._tasks:
@@ -60,13 +64,13 @@ class BackgroundWorkerManager:
         return {"queued": True, "queue": "skill_builder", "kind": "skill_build"}
 
     async def _run_memory_worker(self) -> None:
-        worker = MemoryWorker(self.config, self.hot_store)
         while not self._stop:
             try:
                 job = await asyncio.to_thread(self.memory_queue.get, True, 0.5)
             except queue.Empty:
                 continue
             try:
+                worker = MemoryWorker(self.config, self.hot_store)
                 await asyncio.to_thread(worker.process, job)
             except Exception as exc:
                 print(f"[memory_worker] error: {exc}")
@@ -74,13 +78,13 @@ class BackgroundWorkerManager:
                 self.memory_queue.task_done()
 
     async def _run_skill_builder(self) -> None:
-        worker = SkillBuilderWorker(self.config)
         while not self._stop:
             try:
                 job = await asyncio.to_thread(self.skill_queue.get, True, 0.5)
             except queue.Empty:
                 continue
             try:
+                worker = SkillBuilderWorker(self.config)
                 await asyncio.to_thread(worker.process, job)
             except Exception as exc:
                 print(f"[skill_builder] error: {exc}")
@@ -92,6 +96,8 @@ def start_background_workers(config: dict[str, Any]) -> BackgroundWorkerManager:
     global _MANAGER
     if _MANAGER is None:
         _MANAGER = BackgroundWorkerManager(config)
+    else:
+        _MANAGER.update_config(config)
     _MANAGER.start()
     return _MANAGER
 

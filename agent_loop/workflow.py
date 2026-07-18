@@ -147,6 +147,7 @@ class AgentWorkflow:
             memory["recent_summary"] = {
                 "path": summary_update.path,
                 "token_count": summary_update.token_count,
+                "line_count": summary_update.line_count,
                 "compacted": summary_update.compacted,
                 "error": summary_update.error,
             }

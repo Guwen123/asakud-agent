@@ -8,7 +8,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent_loop.config_loader import project_path
-from agent_loop.models.factory import build_chat_model
+from llm.factory import build_chat_model
 from db.runtime import RuntimeStore
 from memory.forgetting import apply_memory_forgetting
 from memory.hot_store import MemoryHotStore
