@@ -1,95 +1,136 @@
 # asakud-agent
 
-<p align="right">
+<p align="center">
+  <strong>A local long-running Agent with memory, tools, executable skills, style rewriting, MCP integration, and a React dashboard.</strong>
+</p>
+
+<h2 align="center">
   <a href="#english"><kbd>English</kbd></a>
-  &nbsp;|&nbsp;
-  <a href="#中文版本"><kbd>中文</kbd></a>
+  &nbsp;&nbsp;
+  <a href="#中文"><kbd>中文</kbd></a>
+</h2>
+
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" />
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-Backend-009688?style=flat-square&logo=fastapi&logoColor=white" />
+  <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-Agent%20Workflow-1D4ED8?style=flat-square" />
+  <img alt="React" src="https://img.shields.io/badge/React-Dashboard-61DAFB?style=flat-square&logo=react&logoColor=111111" />
+  <img alt="Redis" src="https://img.shields.io/badge/Redis-Hot%20Memory-DC382D?style=flat-square&logo=redis&logoColor=white" />
 </p>
 
 <a id="english"></a>
 
-`asakud-agent` is a local long-running Agent system built around LangGraph, LangChain, FastAPI, Redis, SQLite, executable Skills, Style packages, MCP tools, and browser-capable web search.
+## Overview
 
-The project is designed as a persistent assistant service rather than a one-shot script. It can receive NapCat messages, maintain long-term and short-term memory, call tools, run reusable Skills, rewrite final responses through Style packages, and expose a React dashboard for runtime management.
+`asakud-agent` is a local, persistent Agent system designed for long-running personal assistant scenarios. It combines a LangGraph main workflow, asynchronous sub-agents, durable memory, browser-based web research, executable Skill packages, final-response Style rewriting, MCP tool integration, and a React dashboard.
 
-## Workflow
+Unlike a single-turn chatbot, this project keeps raw conversation history, compacts recent context, stages memory updates through Redis, writes stable knowledge into Markdown memory files, and lets the Agent grow reusable Skills from completed tasks.
+
+## Highlights
+
+- **Long-running Agent workflow**: LangGraph orchestrates message import, meme recognition, memory loading, LLM reasoning, tool calls, style rewriting, memory updates, Skill generation, and final output.
+- **KV-cache-friendly memory design**: cold Markdown memory, Redis hot memory, and `RECENT_SUMMARY` are loaded in a stable prompt order to reduce unnecessary prompt churn.
+- **Browser-capable web research**: `fetch_web` uses Playwright to search, browse, click, inspect accessibility snapshots, extract content, and summarize information in an isolated sub-workflow.
+- **Executable Skill system**: Skill packages contain `SKILL.md`, references, optional Python scripts, and an entry definition. SkillRunner reads instructions with an LLM before deciding whether to run the script.
+- **Async Skill builder**: high-value completed tasks can be converted into reusable Skill packages by a background `skill_builder` sub-agent.
+- **Style packages**: final answers can be rewritten by an independent StyleRunner. ATRI is stored as a Style package rather than a task Skill.
+- **MCP support**: MCP servers can be configured from the dashboard and exposed as runtime tools.
+- **React dashboard**: monitor Agent/computer status, upload Skills and Styles, configure MCP servers, and edit model API settings.
+
+## Architecture
 
 ```text
-incoming message
-  -> import_db
-  -> router_meme
-  -> md_memory
-  -> agent_model
-  -> tools / run_skill loop
-  -> style
-  -> save_long_term
-  -> trim_short_term
-  -> export_db
-  -> save_skill
-  -> print_meme
-  -> response
+User / NapCat / Dashboard
+        |
+        v
+FastAPI runtime
+        |
+        v
+LangGraph main workflow
+        |
+        |-- import_db
+        |-- router_meme
+        |-- md_memory
+        |-- agent_model
+        |-- tools / run_skill loop
+        |-- style
+        |-- save_long_term
+        |-- export_db
+        |-- save_skill
+        `-- print_meme
+        |
+        v
+Final response
 ```
 
-Main prompt order:
+Prompt assembly order:
 
 ```text
 B1: static system prompt + cold Markdown memory
 B2: Redis hot memory
 A: RECENT_SUMMARY
-C: current question
+C: current user question
 ```
 
-The main workflow handles user intent, normal tool calls, Skill routing, memory updates, and final orchestration. Dedicated sub-agents handle web research, memory updates, Skill building, Skill execution, and final style rewriting.
-
-## Features
-
-- LangGraph main workflow with explicit node order and tool loop limit.
-- FastAPI runtime with NapCat callback/send endpoints and dashboard APIs.
-- SQLite append-only raw conversation history plus `memory/RECENT_SUMMARY.md` prompt-facing summary.
-- Markdown cold memory: `MEMORY.md`, `SELF.md`, `CORE.md`, and `PENDING.md`.
-- Redis hot memory for staged memory updates before cold Markdown writes.
-- Playwright-powered `fetch_web` sub-agent for search, browsing, extraction, and summarization.
-- MCP server management from the React dashboard with dynamic remote tool loading.
-- Executable Skill packages with `SKILL.md`, `skill.json`, `reference/`, optional `scripts/`, and `entry`.
-- Async `skill_builder` that can generate reusable Skill packages from high-value completed tasks.
-- Independent Style packages under `styles/`, with ATRI as the default final response style.
-- React dashboard for Agent/computer status, Skill/Style upload, MCP server setup, and model settings.
-
-## Project Structure
+Sub-agent boundaries:
 
 ```text
-asakud-agent/
-|-- main.py                         # FastAPI entrypoint and dashboard API
-|-- agent.config.md                 # Runtime configuration
-|-- llm/                            # LLM factory for main/route/multimodal models
-|-- agent_loop/                     # Main LangGraph workflow and nodes
-|-- compact/                        # RECENT_SUMMARY loading/appending/compaction
-|-- db/                             # SQLite schema and runtime store
-|-- memory/                         # Cold memory, hot store, forgetting helpers
-|-- memory_worker/                  # Async memory update sub-agent
-|-- skill_builder/                  # Async skill generation sub-agent
-|-- skill_runner/                   # Skill execution sub-agent
-|-- style_runner/                   # Final response style sub-agent
-|-- prompts/                        # Prompt templates
-|-- tools/                          # Tool registry, fetch_web, MCP tools
-|-- skills/                         # Skill registry, templates, generated/imported skills
-|-- styles/                         # Style registry and style packages
-|-- frontend/                       # React dashboard
-`-- meme/                           # Meme metadata and image storage
+fetch_web       -> search / browse / extract / summarize webpages
+memory_worker   -> asynchronously merge hot memory into cold Markdown memory
+skill_builder   -> asynchronously generate reusable Skill packages
+skill_runner    -> read SKILL.md, references, and optionally run scripts
+style_runner    -> rewrite final output into the selected speaking style
 ```
+
+## Tech Stack
+
+| Area | Technology |
+| --- | --- |
+| Agent orchestration | LangGraph, LangChain |
+| Backend runtime | FastAPI, Uvicorn, Pydantic |
+| Models | OpenAI-compatible LLM factory with main, route, and multimodal roles |
+| Memory | SQLite, Redis, Markdown memory files |
+| Web research | Playwright |
+| Tooling | local tools, MCP server tools |
+| Frontend | React, Vite |
+| Messaging | NapCat-compatible callback and send APIs |
 
 ## Quick Start
 
-Backend:
+### 1. Install backend dependencies
 
 ```powershell
 pip install -r requirements.txt
 playwright install chromium
+```
+
+### 2. Configure environment variables
+
+```powershell
+$env:MIMO_API_KEY="your_api_key"
+```
+
+The default model settings are stored in `agent.config.md`.
+
+### 3. Bootstrap local files and database
+
+```powershell
 python agent_loop\bootstrap.py
+```
+
+### 4. Start the backend
+
+```powershell
 python main.py
 ```
 
-Frontend dashboard:
+The backend runs at:
+
+```text
+http://127.0.0.1:8000
+```
+
+### 5. Start the dashboard
 
 ```powershell
 cd frontend
@@ -97,13 +138,19 @@ npm install
 npm run dev
 ```
 
-The dashboard calls `http://127.0.0.1:8000` by default. Set `VITE_API_BASE` if the backend runs elsewhere.
+The dashboard runs at:
+
+```text
+http://127.0.0.1:5173
+```
+
+If your backend is not running on `127.0.0.1:8000`, set `VITE_API_BASE` before starting the frontend.
 
 ## Configuration
 
 Runtime configuration lives in the fenced JSON block inside `agent.config.md`.
 
-The LLM configuration is intentionally limited to three model roles:
+The LLM factory only keeps three model roles:
 
 ```json
 {
@@ -125,17 +172,44 @@ The LLM configuration is intentionally limited to three model roles:
 }
 ```
 
-You can also update `base_url`, `api_key`, model name, temperature, and output token limits from the dashboard Settings page.
+You can also update model `base_url`, `api_key`, model name, temperature, and output token limits from the dashboard settings page.
+
+## Memory System
+
+`asakud-agent` separates memory into stable cold memory, short prompt-facing summaries, and hot pending updates.
+
+| Layer | Storage | Purpose |
+| --- | --- | --- |
+| Raw history | SQLite | append-only user/assistant conversation records |
+| Recent summary | `memory/RECENT_SUMMARY.md` | compacted context loaded into the current prompt |
+| Cold memory | Markdown files | stable facts, self-knowledge, pending facts, and archived core memory |
+| Hot memory | Redis | temporary pending updates before asynchronous Markdown writes |
+
+Markdown memory files:
+
+```text
+memory/
+|-- MEMORY.md
+|-- SELF.md
+|-- CORE.md
+|-- PENDING.md
+`-- RECENT_SUMMARY.md
+```
 
 ## Skills
 
-Skills are reusable executable task packages. A complete Skill may contain:
+Skills are reusable executable task packages.
 
 ```text
-SKILL.md
-skill.json
-reference/
-scripts/
+skills/
+|-- skill.config.md
+|-- _templates/
+|-- generated/
+`-- imported-skill/
+    |-- SKILL.md
+    |-- skill.json
+    |-- reference/
+    `-- scripts/
 ```
 
 Execution model:
@@ -144,19 +218,19 @@ Execution model:
 Main Agent
   -> decides whether to call run_skill
 SkillRunnerAgent
-  -> reads SKILL.md + references with an LLM
-  -> if the skill has an entry, exposes only run_skill_script to the sub-LLM
-  -> the script owns fetch_web/MCP calls through context["run_tool"]
-  -> if there is no script, the sub-LLM may directly use enabled project tools
+  -> reads SKILL.md and references with an LLM
+  -> exposes run_skill_script only when the Skill has an executable entry
+  -> script owns fetch_web / MCP calls through context["run_tool"]
+  -> returns a task result to the main workflow
+StyleRunner
+  -> rewrites the final user-facing answer
 ```
 
-This keeps the boundary clear: the LLM reads Skill instructions and decides whether to run the executable script; scripted web/MCP behavior lives inside the script.
-
-`skill_builder` runs asynchronously after a successful main-flow response. It receives the completed task, existing Skill summaries, enabled tools, and local templates from `skills/_templates`, then may generate a new package under `skills/generated/`.
+This design keeps Skill execution explainable: the sub-agent reads the Skill package first, while deterministic actions remain inside the script.
 
 ## Styles
 
-Styles are final-response rewrite packages, separate from executable Skills.
+Styles are final-response rewrite packages. They are separate from executable Skills.
 
 ```text
 styles/
@@ -168,136 +242,214 @@ styles/
     `-- resource/
 ```
 
-ATRI is stored as a Style package, not a Skill package. The main task result is produced first, then StyleRunner rewrites the final answer.
+ATRI is the default Style. The main workflow produces the factual/task result first, then StyleRunner rewrites it into the selected tone.
 
 ## MCP Tools
 
-MCP is disabled by default. The bundled `local-mcp-example` is only a disabled example and will not work unless a real MCP HTTP / Streamable HTTP gateway is running at that address.
+MCP is disabled by default. You can add a real MCP server from the dashboard.
 
 Supported modes:
 
-- `mcp-jsonrpc`: MCP JSON-RPC / Streamable HTTP endpoint, usually ending in `/mcp`.
+- `mcp-jsonrpc`: MCP JSON-RPC / Streamable HTTP endpoint, commonly ending in `/mcp`.
 - `simple-http`: REST-like gateway using `/tools` and `/tools/call`.
 
-Users can add real MCP servers from the dashboard. The backend writes the server into `agent.config.md`, enables `mcp`, probes tools, and exposes remote tools with names such as `mcp.my-mcp.search`.
+Remote tools are exposed with names such as:
+
+```text
+mcp.my-server.search
+mcp.my-server.fetch
+```
 
 ## Dashboard API
 
-- `GET /api/dashboard/status`: Agent/computer/runtime status.
-- `GET /api/dashboard/models`: read `main_model`, `route_model`, and `multimodal_model`.
-- `PUT /api/dashboard/models`: update model `base_url`, `api_key`, name, temperature, and token limits.
-- `GET /api/dashboard/skills`: list registered Skills.
-- `POST /api/dashboard/skills/upload`: upload a Skill zip package.
-- `GET /api/dashboard/styles`: list response Styles.
-- `POST /api/dashboard/styles/upload`: upload a Style zip package.
-- `GET /api/dashboard/mcp`: list MCP servers.
-- `POST /api/dashboard/mcp/servers`: add or update an MCP server.
-- `GET /api/dashboard/mcp/servers/{server_name}/tools`: probe MCP tools.
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/api/dashboard/status` | Agent, computer, and runtime status |
+| `GET` | `/api/dashboard/models` | Read model configuration |
+| `PUT` | `/api/dashboard/models` | Update model API settings |
+| `GET` | `/api/dashboard/skills` | List registered Skills |
+| `POST` | `/api/dashboard/skills/upload` | Upload a Skill zip package |
+| `GET` | `/api/dashboard/styles` | List response Styles |
+| `POST` | `/api/dashboard/styles/upload` | Upload a Style zip package |
+| `GET` | `/api/dashboard/mcp` | List MCP servers |
+| `POST` | `/api/dashboard/mcp/servers` | Add or update an MCP server |
+| `GET` | `/api/dashboard/mcp/servers/{server_name}/tools` | Probe MCP tools |
+
+## Project Structure
+
+```text
+asakud-agent/
+|-- main.py
+|-- agent.config.md
+|-- llm/
+|-- agent_loop/
+|-- compact/
+|-- db/
+|-- frontend/
+|-- memory/
+|-- memory_worker/
+|-- prompts/
+|-- skills/
+|-- skill_builder/
+|-- skill_runner/
+|-- styles/
+|-- style_runner/
+|-- tools/
+`-- meme/
+```
 
 ## Resume Highlights
 
-- Built a LangGraph-based local long-running Agent with memory, tools, executable Skills, Style finalization, and async sub-agents.
-- Implemented `fetch_web` as a Playwright-based web-research capability, isolating search/browse/extract/summarize tasks from the main workflow to reduce token interference and main-context overhead.
+- Built a LangGraph-based local long-running Agent with memory, tool use, executable Skills, Style finalization, and async sub-agents.
+- Implemented a Playwright-based `fetch_web` sub-workflow that isolates search, browsing, extraction, and summarization from the main workflow to reduce context interference and token overhead.
 - Designed an executable Skill system where the main Agent routes tasks, SkillRunner reads `SKILL.md` and references, and scripts own `fetch_web/MCP` calls through a controlled runtime context.
-- Added an async `skill_builder` sub-agent with local templates to generate reusable Skill packages containing `SKILL.md`, references, and optional executable scripts.
-- Implemented Redis hot memory plus Markdown cold memory with RECENT_SUMMARY compaction to balance personalization, persistence, and KV-cache friendliness.
-- Added a React dashboard for runtime status, Skill/Style package uploads, MCP server management, and user-configurable LLM API/base URL settings.
+- Added an async `skill_builder` sub-agent with local templates to generate reusable Skill packages containing instructions, references, and optional executable scripts.
+- Implemented Redis hot memory, Markdown cold memory, and RECENT_SUMMARY compaction to balance personalization, persistence, and KV-cache friendliness.
+- Built a React dashboard for runtime status, Skill/Style uploads, MCP server management, and user-configurable LLM API settings.
+
+## Roadmap
+
+- Add stricter sandboxing for user-uploaded Skill scripts.
+- Add MCP connection health checks and per-server tool permissions.
+- Add dashboard views for memory events and Skill execution traces.
+- Add automated tests for workflow routing, memory compaction, and Skill execution.
+- Add Docker Compose for backend, frontend, Redis, and optional MCP gateway.
 
 ## Notes
 
-Nginx is not required for local development. Use it only when deploying the dashboard and FastAPI service behind HTTPS, static-file serving, or reverse proxy rules.
+Nginx is not required for local development. Use it only when deploying behind HTTPS, static-file serving, or reverse proxy rules.
 
-<hr />
+<p align="right">
+  <a href="#asakud-agent">Back to top</a>
+</p>
 
-<a id="中文版本"></a>
+---
 
-<details>
-<summary><strong>中文版本 / Click to switch to Chinese</strong></summary>
+<a id="中文"></a>
 
-# asakud-agent 中文说明
+# asakud-agent 中文版
 
-`asakud-agent` 是一个本地长期运行的智能体系统，核心围绕 LangGraph、LangChain、FastAPI、Redis、SQLite、可执行 Skill、Style 包、MCP 工具以及具备浏览器能力的网页检索能力构建。
+<p align="center">
+  <strong>一个本地长期运行的 Agent 系统，集成记忆、工具、可执行 Skill、Style 改写、MCP 和 React 控制台。</strong>
+</p>
 
-本项目不是一次性脚本，而是一个可持续运行的本地 Agent 服务。它可以接收 NapCat 消息，维护长期/短期记忆，调用工具，执行可复用 Skill，通过 Style 包统一最终回复语气，并提供 React Dashboard 管理运行状态。
+<h2 align="center">
+  <a href="#english"><kbd>English</kbd></a>
+  &nbsp;&nbsp;
+  <a href="#中文"><kbd>中文</kbd></a>
+</h2>
 
-## 工作流
+## 项目简介
+
+`asakud-agent` 是一个面向本地长期运行场景的智能体系统。它以 LangGraph 主工作流为核心，结合异步子 Agent、长期记忆、浏览器网页检索、可执行 Skill、最终回复 Style 改写、MCP 工具接入和 React Dashboard。
+
+它不是一次性聊天脚本，而是一个可持续运行的个人 Agent 服务：原始对话写入 SQLite，近期上下文压缩为 `RECENT_SUMMARY`，待写入记忆先进入 Redis 热记忆，稳定知识再异步合并进 Markdown 冷记忆，同时还能从高价值任务中沉淀可复用 Skill。
+
+## 核心亮点
+
+- **长期运行 Agent 工作流**：LangGraph 编排消息导入、表情识别、记忆加载、LLM 推理、工具调用、Style 改写、记忆更新、Skill 生成和最终输出。
+- **KV-cache 友好的记忆设计**：冷 Markdown 记忆、Redis 热记忆和 `RECENT_SUMMARY` 按稳定顺序加载，减少不必要的 prompt 抖动。
+- **具备浏览器能力的网页检索**：`fetch_web` 使用 Playwright 完成搜索、浏览、点击、可访问性快照、内容提取和总结，并隔离在子工作流中执行。
+- **可执行 Skill 系统**：Skill 包包含 `SKILL.md`、references、可选 Python 脚本和入口定义，SkillRunner 会先用 LLM 阅读说明，再判断是否运行脚本。
+- **异步 Skill 构建**：高价值已完成任务可以由后台 `skill_builder` 子 Agent 转换成可复用 Skill 包。
+- **Style 包机制**：最终回复由独立 StyleRunner 改写，ATRI 被保存为 Style 包，而不是任务 Skill。
+- **MCP 支持**：可以从 Dashboard 添加 MCP Server，并动态暴露为运行时工具。
+- **React Dashboard**：支持查看 Agent/电脑状态、上传 Skill/Style、配置 MCP Server 和修改模型 API 设置。
+
+## 架构
 
 ```text
-用户消息
-  -> import_db
-  -> router_meme
-  -> md_memory
-  -> agent_model
-  -> tools / run_skill 循环
-  -> style
-  -> save_long_term
-  -> trim_short_term
-  -> export_db
-  -> save_skill
-  -> print_meme
-  -> response
+用户 / NapCat / Dashboard
+        |
+        v
+FastAPI 运行时
+        |
+        v
+LangGraph 主工作流
+        |
+        |-- import_db
+        |-- router_meme
+        |-- md_memory
+        |-- agent_model
+        |-- tools / run_skill loop
+        |-- style
+        |-- save_long_term
+        |-- export_db
+        |-- save_skill
+        `-- print_meme
+        |
+        v
+最终回复
 ```
 
-主提示词顺序：
+Prompt 组装顺序：
 
 ```text
 B1: 静态 system prompt + 冷 Markdown 记忆
 B2: Redis 热记忆
 A: RECENT_SUMMARY
-C: 当前问题
+C: 当前用户问题
 ```
 
-主流程负责理解用户意图、调用普通工具或 `run_skill`、维护记忆以及编排最终输出。网页检索、记忆更新、Skill 构建、Skill 执行和最终语气改写都由独立子流程完成。
-
-## 核心功能
-
-- 基于 LangGraph 的主工作流，节点顺序清晰，并限制工具循环次数。
-- FastAPI 运行时，支持 NapCat 回调/发送接口和 Dashboard API。
-- SQLite 追加式保存原始对话记录，`memory/RECENT_SUMMARY.md` 用于本轮 prompt 可见的压缩摘要。
-- Markdown 冷记忆：`MEMORY.md`、`SELF.md`、`CORE.md`、`PENDING.md`。
-- Redis 热记忆：先暂存待写入记忆，满足条件后再异步写入 Markdown。
-- 基于 Playwright 的 `fetch_web` 子 Agent，支持搜索、浏览、提取和总结。
-- React Dashboard 支持配置 MCP Server，并动态加载远程工具。
-- 可执行 Skill 包支持 `SKILL.md`、`skill.json`、`reference/`、可选 `scripts/` 和 `entry`。
-- 异步 `skill_builder` 可以从高价值任务中自动生成可复用 Skill。
-- `styles/` 下独立管理 Style 包，默认使用 ATRI 作为最终回复风格。
-- React Dashboard 可查看 Agent/电脑状态，上传 Skill/Style，配置 MCP 和 LLM 模型参数。
-
-## 项目结构
+子 Agent 边界：
 
 ```text
-asakud-agent/
-|-- main.py                         # FastAPI 入口和 Dashboard API
-|-- agent.config.md                 # 运行时配置
-|-- llm/                            # 主模型/路由模型/多模态模型工厂
-|-- agent_loop/                     # 主 LangGraph 工作流和节点
-|-- compact/                        # RECENT_SUMMARY 加载、追加和压缩
-|-- db/                             # SQLite schema 和运行时存储
-|-- memory/                         # 冷记忆、热记忆、遗忘机制
-|-- memory_worker/                  # 异步记忆更新子 Agent
-|-- skill_builder/                  # 异步 Skill 生成子 Agent
-|-- skill_runner/                   # Skill 执行子 Agent
-|-- style_runner/                   # 最终回复风格子 Agent
-|-- prompts/                        # Prompt 模板
-|-- tools/                          # 工具注册、fetch_web、MCP 工具
-|-- skills/                         # Skill 注册表、模板、生成/导入的 Skill
-|-- styles/                         # Style 注册表和 Style 包
-|-- frontend/                       # React Dashboard
-`-- meme/                           # 表情包元数据和图片存储
+fetch_web       -> 搜索 / 浏览 / 提取 / 总结网页
+memory_worker   -> 异步将热记忆合并进冷 Markdown 记忆
+skill_builder   -> 异步生成可复用 Skill 包
+skill_runner    -> 阅读 SKILL.md、references，并可选择运行脚本
+style_runner    -> 将最终输出改写成指定语气
 ```
 
-## 快速启动
+## 技术栈
 
-后端：
+| 模块 | 技术 |
+| --- | --- |
+| Agent 编排 | LangGraph, LangChain |
+| 后端运行时 | FastAPI, Uvicorn, Pydantic |
+| 模型层 | OpenAI-compatible LLM factory，分为主模型、路由模型、多模态模型 |
+| 记忆系统 | SQLite, Redis, Markdown |
+| 网页检索 | Playwright |
+| 工具系统 | 本地工具, MCP Server 工具 |
+| 前端 | React, Vite |
+| 消息接入 | NapCat callback/send API |
+
+## 快速开始
+
+### 1. 安装后端依赖
 
 ```powershell
 pip install -r requirements.txt
 playwright install chromium
+```
+
+### 2. 配置环境变量
+
+```powershell
+$env:MIMO_API_KEY="your_api_key"
+```
+
+默认模型配置位于 `agent.config.md`。
+
+### 3. 初始化本地文件和数据库
+
+```powershell
 python agent_loop\bootstrap.py
+```
+
+### 4. 启动后端
+
+```powershell
 python main.py
 ```
 
-前端 Dashboard：
+后端默认运行在：
+
+```text
+http://127.0.0.1:8000
+```
+
+### 5. 启动前端 Dashboard
 
 ```powershell
 cd frontend
@@ -305,13 +457,19 @@ npm install
 npm run dev
 ```
 
-Dashboard 默认请求 `http://127.0.0.1:8000`。如果后端地址不同，可以设置 `VITE_API_BASE`。
+前端默认运行在：
 
-## 配置
+```text
+http://127.0.0.1:5173
+```
+
+如果后端不在 `127.0.0.1:8000`，启动前端前请设置 `VITE_API_BASE`。
+
+## 配置说明
 
 运行时配置位于 `agent.config.md` 的 fenced JSON 代码块中。
 
-LLM 配置只保留三个模型角色：
+LLM 工厂只保留三个模型角色：
 
 ```json
 {
@@ -333,17 +491,44 @@ LLM 配置只保留三个模型角色：
 }
 ```
 
-你也可以在 Dashboard Settings 页面中修改 `base_url`、`api_key`、模型名、温度和输出 token 限制。
+你也可以在 Dashboard 设置页修改模型 `base_url`、`api_key`、模型名、温度和输出 token 限制。
 
-## Skills
+## 记忆系统
 
-Skill 是可复用的可执行任务包。一个完整 Skill 可以包含：
+`asakud-agent` 将记忆分为稳定冷记忆、近期摘要和热更新队列。
+
+| 层级 | 存储 | 用途 |
+| --- | --- | --- |
+| 原始历史 | SQLite | 追加保存 user/assistant 完整对话 |
+| 近期摘要 | `memory/RECENT_SUMMARY.md` | 压缩后的 prompt 可见上下文 |
+| 冷记忆 | Markdown 文件 | 稳定事实、自我认知、待确认事实、归档核心记忆 |
+| 热记忆 | Redis | 异步写入 Markdown 前的临时更新 |
+
+Markdown 记忆文件：
 
 ```text
-SKILL.md
-skill.json
-reference/
-scripts/
+memory/
+|-- MEMORY.md
+|-- SELF.md
+|-- CORE.md
+|-- PENDING.md
+`-- RECENT_SUMMARY.md
+```
+
+## Skill 系统
+
+Skill 是可复用的可执行任务包。
+
+```text
+skills/
+|-- skill.config.md
+|-- _templates/
+|-- generated/
+`-- imported-skill/
+    |-- SKILL.md
+    |-- skill.json
+    |-- reference/
+    `-- scripts/
 ```
 
 执行模型：
@@ -352,17 +537,17 @@ scripts/
 Main Agent
   -> 判断是否调用 run_skill
 SkillRunnerAgent
-  -> 用 LLM 阅读 SKILL.md + references
-  -> 如果 Skill 有 entry，只向子 LLM 暴露 run_skill_script
-  -> 脚本通过 context["run_tool"] 自己调用 fetch_web/MCP
-  -> 如果没有脚本，子 LLM 可以直接使用已启用的项目工具
+  -> 使用 LLM 阅读 SKILL.md 和 references
+  -> 只有当 Skill 存在可执行 entry 时才暴露 run_skill_script
+  -> 脚本通过 context["run_tool"] 自己调用 fetch_web / MCP
+  -> 将任务结果返回主流程
+StyleRunner
+  -> 统一改写最终面向用户的回答
 ```
 
-这样可以保持边界清晰：LLM 负责阅读 Skill 说明并判断是否运行脚本；脚本型 Skill 的联网/MCP 行为封装在脚本内部。
+这个设计让 Skill 执行更清晰：子 Agent 先阅读 Skill 包，确定性动作则留在脚本内部。
 
-`skill_builder` 会在主流程成功回复后异步运行。它会读取已完成任务、已有 Skill 摘要、已启用工具和 `skills/_templates` 下的本地模板，然后尝试在 `skills/generated/` 下生成新的 Skill 包。
-
-## Styles
+## Style 系统
 
 Style 是最终回复改写包，和可执行 Skill 分离。
 
@@ -376,43 +561,83 @@ styles/
     `-- resource/
 ```
 
-ATRI 被保存为 Style，而不是 Skill。主流程先产出任务结果，再由 StyleRunner 统一改写最终语气。
+ATRI 是默认 Style。主工作流先产出事实性任务结果，再由 StyleRunner 改写成指定语气。
 
 ## MCP 工具
 
-MCP 默认关闭。内置的 `local-mcp-example` 只是禁用示例，除非你真的在对应地址启动 MCP HTTP / Streamable HTTP 网关，否则不会工作。
+MCP 默认关闭，可以从 Dashboard 添加真实 MCP Server。
 
 支持模式：
 
 - `mcp-jsonrpc`：MCP JSON-RPC / Streamable HTTP 端点，通常以 `/mcp` 结尾。
 - `simple-http`：REST 风格网关，使用 `/tools` 和 `/tools/call`。
 
-用户可以从 Dashboard 添加真实 MCP Server。后端会写入 `agent.config.md`，启用 `mcp`，探测工具，并以 `mcp.my-mcp.search` 这类名字暴露远程工具。
+远程工具会以类似下面的名字暴露：
+
+```text
+mcp.my-server.search
+mcp.my-server.fetch
+```
 
 ## Dashboard API
 
-- `GET /api/dashboard/status`：Agent、电脑、运行时状态。
-- `GET /api/dashboard/models`：读取 `main_model`、`route_model`、`multimodal_model`。
-- `PUT /api/dashboard/models`：更新模型 `base_url`、`api_key`、名称、温度和 token 限制。
-- `GET /api/dashboard/skills`：列出已注册 Skill。
-- `POST /api/dashboard/skills/upload`：上传 Skill zip 包。
-- `GET /api/dashboard/styles`：列出回复 Style。
-- `POST /api/dashboard/styles/upload`：上传 Style zip 包。
-- `GET /api/dashboard/mcp`：列出 MCP Server。
-- `POST /api/dashboard/mcp/servers`：添加或更新 MCP Server。
-- `GET /api/dashboard/mcp/servers/{server_name}/tools`：探测 MCP 工具。
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/dashboard/status` | Agent、电脑和运行时状态 |
+| `GET` | `/api/dashboard/models` | 读取模型配置 |
+| `PUT` | `/api/dashboard/models` | 更新模型 API 设置 |
+| `GET` | `/api/dashboard/skills` | 列出已注册 Skill |
+| `POST` | `/api/dashboard/skills/upload` | 上传 Skill zip 包 |
+| `GET` | `/api/dashboard/styles` | 列出 Style |
+| `POST` | `/api/dashboard/styles/upload` | 上传 Style zip 包 |
+| `GET` | `/api/dashboard/mcp` | 列出 MCP Server |
+| `POST` | `/api/dashboard/mcp/servers` | 添加或更新 MCP Server |
+| `GET` | `/api/dashboard/mcp/servers/{server_name}/tools` | 探测 MCP 工具 |
+
+## 项目结构
+
+```text
+asakud-agent/
+|-- main.py
+|-- agent.config.md
+|-- llm/
+|-- agent_loop/
+|-- compact/
+|-- db/
+|-- frontend/
+|-- memory/
+|-- memory_worker/
+|-- prompts/
+|-- skills/
+|-- skill_builder/
+|-- skill_runner/
+|-- styles/
+|-- style_runner/
+|-- tools/
+`-- meme/
+```
 
 ## 简历亮点
 
-- 构建基于 LangGraph 的本地长期运行 Agent，集成记忆、工具、可执行 Skill、Style 终稿改写和异步子 Agent。
-- 实现基于 Playwright 的 `fetch_web` 网页检索能力，将搜索/浏览/提取/总结任务从主流程隔离，减少无关上下文干扰和 token 消耗。
+- 构建基于 LangGraph 的本地长期运行 Agent，集成记忆、工具调用、可执行 Skill、Style 终稿改写和异步子 Agent。
+- 实现基于 Playwright 的 `fetch_web` 子工作流，将搜索、浏览、提取和总结从主流程隔离，减少上下文干扰和 token 消耗。
 - 设计可执行 Skill 系统：主 Agent 负责任务路由，SkillRunner 阅读 `SKILL.md` 和 references，脚本通过受控 runtime context 调用 `fetch_web/MCP`。
-- 实现异步 `skill_builder` 子 Agent，结合本地模板生成包含 `SKILL.md`、references 和可选脚本的可复用 Skill 包。
-- 实现 Redis 热记忆 + Markdown 冷记忆 + RECENT_SUMMARY 压缩，在个性化、持久化和 KV-cache 友好之间取得平衡。
-- 增加 React Dashboard，用于运行状态查看、Skill/Style 上传、MCP Server 管理和用户可配置 LLM API/base URL。
+- 实现异步 `skill_builder` 子 Agent，结合本地模板生成包含说明、references 和可选脚本的可复用 Skill 包。
+- 实现 Redis 热记忆、Markdown 冷记忆和 RECENT_SUMMARY 压缩，在个性化、持久化和 KV-cache 友好之间取得平衡。
+- 构建 React Dashboard，支持运行状态查看、Skill/Style 上传、MCP Server 管理和用户可配置 LLM API。
+
+## 后续规划
+
+- 为用户上传的 Skill 脚本增加更严格的沙箱。
+- 增加 MCP 连接健康检查和按 Server 的工具权限控制。
+- 增加 Dashboard 中的记忆事件和 Skill 执行轨迹视图。
+- 增加工作流路由、记忆压缩和 Skill 执行的自动化测试。
+- 增加 Docker Compose，一键启动后端、前端、Redis 和可选 MCP 网关。
 
 ## 说明
 
 本地开发不需要 Nginx。只有在需要 HTTPS、静态文件托管或反向代理规则时，才建议在部署环境中引入 Nginx。
 
-</details>
+<p align="right">
+  <a href="#asakud-agent">返回顶部</a>
+</p>
