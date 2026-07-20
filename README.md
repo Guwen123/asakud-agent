@@ -4,11 +4,11 @@
   <strong>A Web Research Agent for searching, browsing, extracting, and summarizing public web information.</strong>
 </p>
 
-<h2 align="center">
-  <a href="#english"><kbd>English</kbd></a>
-  &nbsp;&nbsp;
-  <a href="#中文"><kbd>中文</kbd></a>
-</h2>
+<h1 align="center">
+  <a href="#english"><kbd>&nbsp;&nbsp;English&nbsp;&nbsp;</kbd></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="#中文"><kbd>&nbsp;&nbsp;中文&nbsp;&nbsp;</kbd></a>
+</h1>
 
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" />
