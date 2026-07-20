@@ -4,7 +4,7 @@ import "./styles.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 const LANGUAGE_STORAGE_KEY = "asakud-dashboard-language";
-const navItems = ["overview", "performance", "skills", "styles", "mcp", "napcat", "settings", "runtime"];
+const navItems = ["overview", "research", "performance", "skills", "styles", "mcp", "napcat", "settings", "runtime"];
 const modelKeys = ["main_model", "route_model", "multimodal_model"];
 const initialMcpForm = {
   name: "my-mcp",
@@ -31,6 +31,7 @@ const I18N = {
     brand: { title: "asakud-agent", subtitle: "Control Dashboard" },
     nav: {
       overview: "Overview",
+      research: "Research",
       performance: "Performance",
       skills: "Skills",
       styles: "Styles",
@@ -47,6 +48,9 @@ const I18N = {
     },
     pages: {
       overview: "Agent, computer, and service health at a glance.",
+      research: "Stored crawl dates and web research results from fetch_web.",
+      researchTitle: "Web Research Records",
+      researchSubtitle: "Recent fetch_web queries, crawl dates, status, and summarized results.",
       performance: "Fine-grained Agent performance traces for node execution, tool latency, and token usage.",
       performanceTitle: "Performance Monitor",
       performanceSubtitle: "Recent LangGraph runs, tool calls, and model token consumption.",
@@ -84,9 +88,9 @@ const I18N = {
     },
     kinds: { skills: "Skill", styles: "Style" },
     agent: {
-      eyebrow: "Local long-running Agent",
+      eyebrow: "Web Research Agent",
       fallbackName: "asakud-agent",
-      fallbackDesc: "Memory, tools, skills, and styles.",
+      fallbackDesc: "Search, browse, extract, summarize, and monitor public web information.",
       uptime: (minutes) => `${minutes} min uptime`,
       skills: (count) => `${count} skills`,
       mcpServers: (count) => `${count} MCP servers`,
@@ -129,6 +133,16 @@ const I18N = {
       total: "total",
       ok: "ok",
       failed: "failed",
+    },
+    research: {
+      empty: "No crawl records yet. Ask the Agent to search the web to create one.",
+      query: "Query",
+      result: "Result",
+      date: "Crawl date",
+      status: "Status",
+      ok: "ok",
+      failed: "failed",
+      count: (count) => `${count} crawls`,
     },
     runtimeFlags: {
       workers: "Workers",
@@ -212,6 +226,7 @@ const I18N = {
     brand: { title: "asakud-agent", subtitle: "控制台" },
     nav: {
       overview: "总览",
+      research: "网页记录",
       performance: "性能监控",
       skills: "技能",
       styles: "风格",
@@ -228,6 +243,9 @@ const I18N = {
     },
     pages: {
       overview: "快速查看智能体、电脑资源和服务健康状态。",
+      research: "查看 fetch_web 保存的爬取日期和网页研究结果。",
+      researchTitle: "网页研究记录",
+      researchSubtitle: "最近的 fetch_web 查询、爬取日期、状态和结果摘要。",
       performance: "细粒度查看节点执行时长、工具调用延迟和 Token 消耗。",
       performanceTitle: "性能监控",
       performanceSubtitle: "最近的 LangGraph 运行、工具调用和模型 Token 消耗。",
@@ -265,9 +283,9 @@ const I18N = {
     },
     kinds: { skills: "Skill", styles: "Style" },
     agent: {
-      eyebrow: "本地长期运行智能体",
+      eyebrow: "网页研究智能体",
       fallbackName: "asakud-agent",
-      fallbackDesc: "记忆、工具、技能和风格系统。",
+      fallbackDesc: "面向公开网页的搜索、浏览、提取、汇总与监控。",
       uptime: (minutes) => `已运行 ${minutes} 分钟`,
       skills: (count) => `${count} 个技能`,
       mcpServers: (count) => `${count} 个 MCP 服务`,
@@ -310,6 +328,16 @@ const I18N = {
       total: "总量",
       ok: "成功",
       failed: "失败",
+    },
+    research: {
+      empty: "还没有爬取记录。让 Agent 搜索网页后会在这里生成记录。",
+      query: "查询",
+      result: "结果",
+      date: "爬取日期",
+      status: "状态",
+      ok: "成功",
+      failed: "失败",
+      count: (count) => `${count} 条记录`,
     },
     runtimeFlags: {
       workers: "后台任务",
@@ -425,6 +453,7 @@ function App() {
   const [mcpTools, setMcpTools] = useState({});
   const [mcpForm, setMcpForm] = useState(initialMcpForm);
   const [performance, setPerformance] = useState({ summary: {}, traces: [] });
+  const [crawls, setCrawls] = useState([]);
   const [active, setActive] = useState("overview");
   const [notice, setNotice] = useState(() => I18N[getInitialLanguage()].notices.connecting);
   const modelDirtyRef = useRef(false);
@@ -432,7 +461,7 @@ function App() {
 
   async function refresh() {
     try {
-      const [statusRes, skillsRes, stylesRes, mcpRes, napcatRes, modelsRes, performanceRes] = await Promise.all([
+      const [statusRes, skillsRes, stylesRes, mcpRes, napcatRes, modelsRes, performanceRes, crawlsRes] = await Promise.all([
         fetch(`${API_BASE}/api/dashboard/status`),
         fetch(`${API_BASE}/api/dashboard/skills`),
         fetch(`${API_BASE}/api/dashboard/styles`),
@@ -440,6 +469,7 @@ function App() {
         fetch(`${API_BASE}/api/dashboard/napcat`),
         fetch(`${API_BASE}/api/dashboard/models`),
         fetch(`${API_BASE}/api/dashboard/performance?limit=20`),
+        fetch(`${API_BASE}/api/dashboard/crawls?limit=20`),
       ]);
       const statusData = await statusRes.json();
       const skillsData = await skillsRes.json();
@@ -448,11 +478,13 @@ function App() {
       const napcatData = await napcatRes.json();
       const modelsData = await modelsRes.json();
       const performanceData = await performanceRes.json();
+      const crawlsData = await crawlsRes.json();
       setStatus(statusData);
       setSkills(skillsData.skills || []);
       setStyles(stylesData.styles || []);
       setMcp(mcpData || { enabled: false, servers: [] });
       setPerformance(performanceData || { summary: {}, traces: [] });
+      setCrawls(crawlsData.crawls || []);
       setNapcat(napcatData.napcat || initialNapcatForm);
       if (!napcatDirtyRef.current) {
         setNapcatForm(napcatData.napcat || initialNapcatForm);
@@ -740,6 +772,8 @@ function App() {
             onSubmit={saveModels}
           />
         );
+      case "research":
+        return <ResearchPanel copy={copy} crawls={crawls} />;
       case "performance":
         return <PerformancePanel copy={copy} performance={performance} />;
       case "runtime":
@@ -816,6 +850,47 @@ function OverviewPanel({ copy, agent, computer, runtime }) {
         />
       </section>
       <RuntimeFlags copy={copy} runtime={runtime} />
+    </div>
+  );
+}
+
+function ResearchPanel({ copy, crawls }) {
+  const items = Array.isArray(crawls) ? crawls : [];
+  return (
+    <div className="page-stack">
+      <p className="page-intro">{copy.pages.research}</p>
+      <article className="card research-card">
+        <div className="panel-head">
+          <div>
+            <p>{copy.pages.researchSubtitle}</p>
+            <h2>{copy.pages.researchTitle}</h2>
+          </div>
+          <span>{copy.research.count(items.length)}</span>
+        </div>
+      </article>
+      <section className="crawl-list">
+        {items.length === 0 && <div className="empty">{copy.research.empty}</div>}
+        {items.map((item) => (
+          <article className={`card crawl-card ${item.ok === false ? "failed" : ""}`} key={item.id}>
+            <div className="crawl-head">
+              <div>
+                <small>{copy.research.query}</small>
+                <strong>{item.query || "-"}</strong>
+              </div>
+              <div className="crawl-meta">
+                <span>{copy.research.date}: {formatDateTime(item.created_at)}</span>
+                <em className={item.ok === false ? "failed" : "ok"}>
+                  {copy.research.status}: {item.ok === false ? copy.research.failed : copy.research.ok}
+                </em>
+              </div>
+            </div>
+            <div className="crawl-result">
+              <small>{copy.research.result}</small>
+              <p>{shortText(item.ok === false ? item.error : item.result, 900) || "-"}</p>
+            </div>
+          </article>
+        ))}
+      </section>
     </div>
   );
 }
@@ -963,6 +1038,19 @@ function formatMs(value) {
 function shortTraceId(value) {
   const text = String(value || "");
   return text ? `trace-${text.slice(0, 8)}` : "trace";
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function shortText(value, limit = 900) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 3)).trim()}...`;
 }
 
 function RuntimePanel({ copy, computer, runtime }) {

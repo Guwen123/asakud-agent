@@ -39,6 +39,18 @@ class SessionRecord:
     started_at: str
 
 
+@dataclass(frozen=True)
+class WebCrawlRecord:
+    id: str
+    session_id: str | None
+    query: str
+    result: str
+    ok: bool
+    error: str | None
+    created_at: str
+    metadata: dict[str, Any] | None
+
+
 class RuntimeStore:
     def __init__(self, database_path: Path, schema_path: Path) -> None:
         self.database_path = database_path
@@ -122,6 +134,40 @@ class RuntimeStore:
         self.conn.commit()
         return event_id
 
+    def add_web_crawl(
+        self,
+        query: str,
+        result: str,
+        *,
+        ok: bool = True,
+        error: str | None = None,
+        session_id: str | None = None,
+        crawl_id: str | None = None,
+        created_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        crawl_id = crawl_id or new_id()
+        self.conn.execute(
+            """
+            INSERT INTO web_crawls(
+                id, session_id, query, result, ok, error, created_at, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                crawl_id,
+                session_id,
+                query,
+                result,
+                1 if ok else 0,
+                error,
+                created_at or now_iso(),
+                dump_json(metadata),
+            ),
+        )
+        self.conn.commit()
+        return crawl_id
+
     def get_messages(self, session_id: str, limit: int | None = None) -> list[MessageRecord]:
         if limit is None:
             rows = self.conn.execute(
@@ -171,3 +217,32 @@ class RuntimeStore:
             )
             for row in rows
         ]
+
+    def list_web_crawls(self, limit: int = 20) -> list[WebCrawlRecord]:
+        rows = self.conn.execute(
+            "SELECT * FROM web_crawls ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            WebCrawlRecord(
+                id=row["id"],
+                session_id=row["session_id"],
+                query=row["query"],
+                result=row["result"],
+                ok=bool(row["ok"]),
+                error=row["error"],
+                created_at=row["created_at"],
+                metadata=_load_json(row["metadata_json"]),
+            )
+            for row in rows
+        ]
+
+
+def _load_json(value: str | None) -> dict[str, Any] | None:
+    if not value:
+        return None
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None

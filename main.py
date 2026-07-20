@@ -26,6 +26,7 @@ from agent_loop.config_loader import load_config, load_raw_config, project_path
 from agent_loop.loop import run_agent_once_async
 from agent_loop.nodes.skills import load_skill_registry, write_skill_registry
 from agent_loop.observability import performance_snapshot
+from db.runtime import RuntimeStore
 from tools.mcp.factory import DEFAULT_MCP_SERVER, configured_mcp_servers, list_mcp_server_tools
 
 
@@ -100,7 +101,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="asakud-agent",
-    description="Long-running local Agent service.",
+    description="Local Web Research Agent service.",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -195,6 +196,22 @@ async def dashboard_status() -> dict[str, Any]:
 @app.get("/api/dashboard/performance")
 async def dashboard_performance(limit: int = 20) -> dict[str, Any]:
     return performance_snapshot(limit=limit)
+
+
+@app.get("/api/dashboard/crawls")
+async def dashboard_crawls(limit: int = 20) -> dict[str, Any]:
+    safe_limit = max(1, min(int(limit or 20), 100))
+    store = _new_runtime_store(app.state.config)
+    store.initialize()
+    try:
+        crawls = store.list_web_crawls(limit=safe_limit)
+    finally:
+        store.close()
+    return {
+        "ok": True,
+        "count": len(crawls),
+        "crawls": [_web_crawl_payload(item) for item in crawls],
+    }
 
 
 @app.get("/api/dashboard/models")
@@ -1102,6 +1119,27 @@ def _write_runtime_config(config: dict[str, Any]) -> None:
         flags=re.DOTALL,
     )
     config_path.write_text(updated, encoding="utf-8")
+
+
+def _new_runtime_store(config: dict[str, Any]) -> RuntimeStore:
+    db_config = dict(config.get("db", {}))
+    paths_config = dict(config.get("paths", {}))
+    db_config.setdefault("database", paths_config.get("database", "db/session_memory.db"))
+    db_config.setdefault("schema", paths_config.get("schema", "db/session_memory.schema.sql"))
+    return RuntimeStore(project_path(db_config["database"]), project_path(db_config["schema"]))
+
+
+def _web_crawl_payload(record: Any) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "session_id": record.session_id,
+        "query": record.query,
+        "result": record.result,
+        "ok": record.ok,
+        "error": record.error or "",
+        "created_at": record.created_at,
+        "metadata": record.metadata or {},
+    }
 
 
 def _extract_text(message: Any) -> str:

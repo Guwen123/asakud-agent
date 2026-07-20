@@ -48,6 +48,19 @@ CREATE TABLE IF NOT EXISTS skill_runs (
 );
 
 
+CREATE TABLE IF NOT EXISTS web_crawls (
+  id TEXT PRIMARY KEY,
+  session_id TEXT,
+  query TEXT NOT NULL,
+  result TEXT NOT NULL,
+  ok INTEGER NOT NULL DEFAULT 1,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  metadata_json TEXT,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+);
+
+
 CREATE TABLE IF NOT EXISTS reminders (
   id TEXT PRIMARY KEY,
   session_id TEXT,
@@ -94,6 +107,10 @@ ON reminders(status, next_run_at);
 
 CREATE INDEX IF NOT EXISTS idx_reminder_runs_reminder_created
 ON reminder_runs(reminder_id, created_at);
+
+
+CREATE INDEX IF NOT EXISTS idx_web_crawls_created
+ON web_crawls(created_at);
 
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

@@ -399,7 +399,8 @@ nav button.active i {
     radial-gradient(circle at 90% 14%, rgba(199, 180, 255, 0.28), transparent 32%);
 }
 
-.performance-card {
+.performance-card,
+.research-card {
   padding: 22px;
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 246, 250, 0.58)),
@@ -461,8 +462,23 @@ nav button.active i {
   gap: 14px;
 }
 
+.crawl-list {
+  display: grid;
+  gap: 14px;
+}
+
 .trace-card {
   padding: 18px;
+}
+
+.crawl-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.crawl-card.failed {
+  border-color: rgba(216, 43, 117, 0.28);
 }
 
 .trace-head {
@@ -472,14 +488,39 @@ nav button.active i {
   margin-bottom: 12px;
 }
 
+.crawl-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
 .trace-head strong,
-.trace-head small {
+.trace-head small,
+.crawl-head strong,
+.crawl-head small {
   display: block;
 }
 
-.trace-head small {
+.trace-head small,
+.crawl-head small,
+.crawl-result small {
   color: var(--muted);
   font-size: 12px;
+}
+
+.crawl-head strong {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crawl-meta {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .trace-pills {
@@ -491,13 +532,40 @@ nav button.active i {
 
 .trace-pills span,
 .token-row span,
-.timing-item em {
+.timing-item em,
+.crawl-meta span,
+.crawl-meta em {
   padding: 6px 9px;
   border-radius: 999px;
   color: #d82b75;
   background: rgba(255, 177, 209, 0.26);
   font-size: 12px;
   font-weight: 900;
+}
+
+.crawl-meta em.ok {
+  color: #1f9d65;
+  background: rgba(94, 222, 157, 0.18);
+  font-style: normal;
+}
+
+.crawl-meta em.failed {
+  color: #d82b75;
+  background: rgba(255, 177, 209, 0.3);
+  font-style: normal;
+}
+
+.crawl-result {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.crawl-result p {
+  margin: 8px 0 0;
+  color: #3b3542;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .token-row {
@@ -992,12 +1060,14 @@ nav button.active i {
     grid-template-columns: 1fr;
   }
 
-  .trace-head {
+  .trace-head,
+  .crawl-head {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .trace-pills {
+  .trace-pills,
+  .crawl-meta {
     justify-content: flex-start;
   }
 

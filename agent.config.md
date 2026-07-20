@@ -6,7 +6,7 @@ The program reads the fenced `json` block below as its runtime configuration.
 {
   "agent": {
     "name": "asakud-agent",
-    "description": "Local long-running memory agent.",
+    "description": "Local Web Research Agent for searching, browsing, extracting, and summarizing public web information.",
     "language": "zh-CN",
     "timezone": "Asia/Shanghai"
   },
@@ -184,6 +184,7 @@ The program reads the fenced `json` block below as its runtime configuration.
         "messages",
         "memory_events",
         "skill_runs",
+        "web_crawls",
         "reminders",
         "reminder_runs"
       ],
