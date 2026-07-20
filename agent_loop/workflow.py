@@ -13,6 +13,7 @@ from db.runtime import RuntimeStore
 from .background import enqueue_memory_update
 from .config_loader import load_config, project_path
 from .nodes.core import AgentNodes
+from .observability import finalize_trace, time_node
 
 
 class AgentWorkflow:
@@ -37,17 +38,17 @@ class AgentWorkflow:
             tool_step_count: int
 
         workflow = StateGraph(WorkflowState)
-        workflow.add_node("import_db", RunnableLambda(self._import_db_state))
-        workflow.add_node("router_meme", self.nodes.get_router_meme_node())
-        workflow.add_node("md_memory", self.nodes.get_md_memory_node())
-        workflow.add_node("agent_model", self.nodes.get_agent_model_node())
-        workflow.add_node("tools", self.nodes.get_tool_node())
-        workflow.add_node("style", self.nodes.get_style_node())
-        workflow.add_node("save_long_term", RunnableLambda(self._save_long_term_memory))
-        workflow.add_node("trim_short_term", RunnableLambda(self._trim_short_term_memory))
-        workflow.add_node("export_db", RunnableLambda(self._export_db_state))
-        workflow.add_node("save_skill", self.nodes.get_save_skill_node())
-        workflow.add_node("print_meme", self.nodes.get_print_meme_node())
+        workflow.add_node("import_db", self._timed_node("import_db", RunnableLambda(self._import_db_state)))
+        workflow.add_node("router_meme", self._timed_node("router_meme", self.nodes.get_router_meme_node()))
+        workflow.add_node("md_memory", self._timed_node("md_memory", self.nodes.get_md_memory_node()))
+        workflow.add_node("agent_model", self._timed_node("agent_model", self.nodes.get_agent_model_node()))
+        workflow.add_node("tools", self._timed_node("tools", self.nodes.get_tool_node()))
+        workflow.add_node("style", self._timed_node("style", self.nodes.get_style_node()))
+        workflow.add_node("save_long_term", self._timed_node("save_long_term", RunnableLambda(self._save_long_term_memory)))
+        workflow.add_node("trim_short_term", self._timed_node("trim_short_term", RunnableLambda(self._trim_short_term_memory)))
+        workflow.add_node("export_db", self._timed_node("export_db", RunnableLambda(self._export_db_state)))
+        workflow.add_node("save_skill", self._timed_node("save_skill", self.nodes.get_save_skill_node()))
+        workflow.add_node("print_meme", self._timed_node("print_meme", self.nodes.get_print_meme_node(), finalize=True))
 
         workflow.add_edge(START, "import_db")
         workflow.add_edge("import_db", "router_meme")
@@ -73,6 +74,15 @@ class AgentWorkflow:
         if self.graph is None:
             raise ValueError("Workflow not built. Call build_workflow() first.")
         return self.graph.compile()
+
+    def _timed_node(self, name: str, runnable: Runnable, *, finalize: bool = False) -> Runnable:
+        def _run(state: dict[str, Any]) -> dict[str, Any]:
+            result = time_node(state, name, runnable.invoke)
+            if finalize:
+                finalize_trace(result)
+            return result
+
+        return RunnableLambda(_run)
 
     def _has_tool_calls(self, state: dict[str, Any]) -> str:
         messages = state.get("messages", [])

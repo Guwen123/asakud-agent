@@ -89,6 +89,8 @@ class StyleRunnerAgent:
     def _style_source(self, style_name: str) -> dict[str, str]:
         registry_item = _style_registry_item(self.config, style_name)
         if registry_item:
+            if not bool(registry_item.get("enabled", True)):
+                return {"type": "disabled"}
             guide = str(registry_item.get("guide", "") or "").strip()
             if guide:
                 return {"type": "guide", "content": guide, "style_type": str(registry_item.get("type", "") or "")}

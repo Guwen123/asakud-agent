@@ -80,6 +80,7 @@ memory_worker   -> asynchronously merge hot memory into cold Markdown memory
 skill_builder   -> asynchronously generate reusable Skill packages
 skill_runner    -> read SKILL.md, references, and optionally run scripts
 style_runner    -> rewrite final output into the selected speaking style
+reminder_worker -> poll structured reminder rows and dispatch due NapCat messages
 ```
 
 ## Tech Stack
@@ -90,6 +91,7 @@ style_runner    -> rewrite final output into the selected speaking style
 | Backend runtime | FastAPI, Uvicorn, Pydantic |
 | Models | OpenAI-compatible LLM factory with main, route, and multimodal roles |
 | Memory | SQLite, Redis, Markdown memory files |
+| Reminders | SQLite reminder tables, background worker, NapCat delivery |
 | Web research | Playwright |
 | Tooling | local tools, MCP server tools |
 | Frontend | React, Vite |
@@ -104,17 +106,13 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 2. Bootstrap local files and database
-
-```powershell
-python agent_loop\bootstrap.py
-```
-
-### 3. Start the backend
+### 2. Start the backend
 
 ```powershell
 python main.py
 ```
+
+`main.py` automatically runs bootstrap during FastAPI startup, so you do not need to run `python agent_loop\bootstrap.py` manually.
 
 The backend runs at:
 
@@ -122,7 +120,7 @@ The backend runs at:
 http://127.0.0.1:8000
 ```
 
-### 4. Start the dashboard
+### 3. Start the dashboard
 
 ```powershell
 cd frontend
@@ -138,7 +136,7 @@ http://127.0.0.1:5173
 
 If your backend is not running on `127.0.0.1:8000`, set `VITE_API_BASE` before starting the frontend.
 
-### 5. Fill model settings from the dashboard
+### 4. Fill model settings from the dashboard
 
 Open the dashboard Settings page and fill `base_url`, `api_key`, and model name for `main_model`, `route_model`, and `multimodal_model`. The backend writes these values into `agent.config.md`.
 
@@ -223,6 +221,13 @@ StyleRunner
 ```
 
 This design keeps Skill execution explainable: the sub-agent reads the Skill package first, while deterministic actions remain inside the script.
+Each Skill registry entry supports `enabled: true/false`; disabled Skills stay visible in the dashboard but are excluded from runtime routing.
+
+## Reminders
+
+Reminder requests are handled as structured tasks, not as Markdown memory. The Agent uses `create_reminder`, `list_reminders`, and `cancel_reminder`; reminder rows live in SQLite, and `reminder_worker` polls due tasks and sends messages through NapCat.
+
+`once` reminders store an absolute `run_at` and become `done` after firing. `daily` and `weekly` reminders store recurrence fields such as `time_of_day` and update `next_run_at` after each successful delivery.
 
 ## Styles
 
@@ -239,6 +244,7 @@ styles/
 ```
 
 ATRI is the default Style. The main workflow produces the factual/task result first, then StyleRunner rewrites it into the selected tone.
+Each Style registry entry supports `enabled: true/false`; disabling the selected Style skips final response rewriting.
 
 ## MCP Tools
 
@@ -261,12 +267,17 @@ mcp.my-server.fetch
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/api/dashboard/status` | Agent, computer, and runtime status |
+| `GET` | `/api/dashboard/performance` | Recent node timing, tool latency, and token usage traces |
 | `GET` | `/api/dashboard/models` | Read model configuration |
 | `PUT` | `/api/dashboard/models` | Update model API settings |
+| `GET` | `/api/dashboard/napcat` | Read NapCat QQ settings |
+| `PUT` | `/api/dashboard/napcat` | Update NapCat QQ connection settings |
 | `GET` | `/api/dashboard/skills` | List registered Skills |
 | `POST` | `/api/dashboard/skills/upload` | Upload a Skill zip package |
+| `PATCH` | `/api/dashboard/skills/{skill_id}` | Enable or disable a Skill |
 | `GET` | `/api/dashboard/styles` | List response Styles |
 | `POST` | `/api/dashboard/styles/upload` | Upload a Style zip package |
+| `PATCH` | `/api/dashboard/styles/{style_id}` | Enable or disable a Style |
 | `GET` | `/api/dashboard/mcp` | List MCP servers |
 | `POST` | `/api/dashboard/mcp/servers` | Add or update an MCP server |
 | `GET` | `/api/dashboard/mcp/servers/{server_name}/tools` | Probe MCP tools |
@@ -374,6 +385,7 @@ memory_worker   -> 异步将热记忆合并进冷 Markdown 记忆
 skill_builder   -> 异步生成可复用 Skill 包
 skill_runner    -> 阅读 SKILL.md、references，并可选择运行脚本
 style_runner    -> 将最终输出改写成指定语气
+reminder_worker -> 轮询结构化提醒任务，并通过 NapCat 发送到期消息
 ```
 
 ## 技术栈
@@ -384,6 +396,7 @@ style_runner    -> 将最终输出改写成指定语气
 | 后端运行时 | FastAPI, Uvicorn, Pydantic |
 | 模型层 | OpenAI-compatible LLM factory，分为主模型、路由模型、多模态模型 |
 | 记忆系统 | SQLite, Redis, Markdown |
+| 提醒系统 | SQLite 提醒表, 后台 worker, NapCat 发送 |
 | 网页检索 | Playwright |
 | 工具系统 | 本地工具, MCP Server 工具 |
 | 前端 | React, Vite |
@@ -398,17 +411,13 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 2. 初始化本地文件和数据库
-
-```powershell
-python agent_loop\bootstrap.py
-```
-
-### 3. 启动后端
+### 2. 启动后端
 
 ```powershell
 python main.py
 ```
+
+`main.py` 会在 FastAPI 启动时自动执行 bootstrap，所以正常启动不需要手动运行 `python agent_loop\bootstrap.py`。
 
 后端默认运行在：
 
@@ -416,7 +425,7 @@ python main.py
 http://127.0.0.1:8000
 ```
 
-### 4. 启动前端 Dashboard
+### 3. 启动前端 Dashboard
 
 ```powershell
 cd frontend
@@ -432,7 +441,7 @@ http://127.0.0.1:5173
 
 如果后端不在 `127.0.0.1:8000`，启动前端前请设置 `VITE_API_BASE`。
 
-### 5. 在 Dashboard 中填写模型设置
+### 4. 在 Dashboard 中填写模型设置
 
 打开 Dashboard 的 Settings 页面，为 `main_model`、`route_model` 和 `multimodal_model` 填写 `base_url`、`api_key` 和模型名。后端会把这些值写入 `agent.config.md`。
 
@@ -518,6 +527,12 @@ StyleRunner
 
 这个设计让 Skill 执行更清晰：子 Agent 先阅读 Skill 包，确定性动作则留在脚本内部。
 
+## 提醒系统
+
+提醒请求会作为结构化任务处理，不写入 Markdown 记忆。Agent 使用 `create_reminder`、`list_reminders` 和 `cancel_reminder`；提醒记录存入 SQLite，`reminder_worker` 会轮询到期任务并通过 NapCat 发送消息。
+
+`once` 提醒保存绝对时间 `run_at`，触发后变为 `done`；`daily` / `weekly` 提醒保存 `time_of_day` 等重复规则，每次发送成功后更新下一次 `next_run_at`。
+
 ## Style 系统
 
 Style 是最终回复改写包，和可执行 Skill 分离。
@@ -555,12 +570,17 @@ mcp.my-server.fetch
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/dashboard/status` | Agent、电脑和运行时状态 |
+| `GET` | `/api/dashboard/performance` | 最近节点耗时、工具延迟和 Token 消耗 Trace |
 | `GET` | `/api/dashboard/models` | 读取模型配置 |
 | `PUT` | `/api/dashboard/models` | 更新模型 API 设置 |
+| `GET` | `/api/dashboard/napcat` | 读取 NapCat QQ 设置 |
+| `PUT` | `/api/dashboard/napcat` | 更新 NapCat QQ 连接设置 |
 | `GET` | `/api/dashboard/skills` | 列出已注册 Skill |
 | `POST` | `/api/dashboard/skills/upload` | 上传 Skill zip 包 |
+| `PATCH` | `/api/dashboard/skills/{skill_id}` | 启用或禁用 Skill |
 | `GET` | `/api/dashboard/styles` | 列出 Style |
 | `POST` | `/api/dashboard/styles/upload` | 上传 Style zip 包 |
+| `PATCH` | `/api/dashboard/styles/{style_id}` | 启用或禁用 Style |
 | `GET` | `/api/dashboard/mcp` | 列出 MCP Server |
 | `POST` | `/api/dashboard/mcp/servers` | 添加或更新 MCP Server |
 | `GET` | `/api/dashboard/mcp/servers/{server_name}/tools` | 探测 MCP 工具 |

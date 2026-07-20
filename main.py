@@ -10,7 +10,7 @@ import shutil
 import tempfile
 import time
 import zipfile
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -25,7 +25,7 @@ from agent_loop.bootstrap import bootstrap
 from agent_loop.config_loader import load_config, load_raw_config, project_path
 from agent_loop.loop import run_agent_once_async
 from agent_loop.nodes.skills import load_skill_registry, write_skill_registry
-from agent_loop.scheduler import MarkdownTaskScheduler
+from agent_loop.observability import performance_snapshot
 from tools.mcp.factory import DEFAULT_MCP_SERVER, configured_mcp_servers, list_mcp_server_tools
 
 
@@ -50,6 +50,15 @@ class MCPServerRequest(BaseModel):
     call_path: str | None = None
 
 
+class NapCatSettingsRequest(BaseModel):
+    enabled: bool = True
+    http_url: str = "http://127.0.0.1:3000"
+    token: str = ""
+    callback_path: str = "/getMessage"
+    reply_path: str = "/sendMessage"
+    report_format: str = "string"
+
+
 class LLMModelConfigRequest(BaseModel):
     provider: str = "custom"
     protocol: str = "openai-compatible"
@@ -66,14 +75,15 @@ class LLMSettingsRequest(BaseModel):
     multimodal_model: LLMModelConfigRequest
 
 
-async def scheduled_task_loop(app: FastAPI) -> None:
-    while True:
-        interval = app.state.config.get("server", {}).get("scheduler_interval_seconds", 30)
-        try:
-            await app.state.scheduler.tick()
-        except Exception as exc:
-            print(f"[scheduler_loop] error: {exc}")
-        await asyncio.sleep(interval)
+class ModelDiscoveryRequest(BaseModel):
+    provider: str = "custom"
+    protocol: str = "openai-compatible"
+    base_url: str
+    api_key: str
+
+
+class PackageEnabledRequest(BaseModel):
+    enabled: bool
 
 
 @asynccontextmanager
@@ -81,19 +91,10 @@ async def lifespan(app: FastAPI):
     bootstrap()
     app.state.config = load_config()
     app.state.started_at = time.time()
-    app.state.last_message_target = None
     app.state.background_workers = start_background_workers(app.state.config)
-    app.state.scheduler = MarkdownTaskScheduler(
-        app.state.config,
-        execute_task=lambda task_content: _execute_scheduled_task(app, task_content),
-    )
-    app.state.scheduler_task = asyncio.create_task(scheduled_task_loop(app), name="scheduler_loop")
     try:
         yield
     finally:
-        app.state.scheduler_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await app.state.scheduler_task
         await stop_background_workers()
 
 
@@ -118,6 +119,16 @@ app.add_middleware(
 
 @app.post("/getMessage")
 async def get_message(request: Request) -> dict[str, Any]:
+    return await _handle_napcat_callback(app, request)
+
+
+@app.post("/sendMessage")
+async def send_message(request: SendMessageRequest) -> dict[str, Any]:
+    result = await _send_message(app, request)
+    return {"ok": True, "result": result}
+
+
+async def _handle_napcat_callback(app: FastAPI, request: Request) -> dict[str, Any]:
     try:
         event = await request.json()
     except Exception:
@@ -138,9 +149,8 @@ async def get_message(request: Request) -> dict[str, Any]:
         return {"ok": True, "ignored": True, "reason": "not_addressed_to_agent"}
 
     target = _event_to_target(event)
-    app.state.last_message_target = target
 
-    reply = await run_agent_once_async(message_text)
+    reply = await run_agent_once_async(message_text, message_target=_target_payload(target))
     send_result = await _send_message(
         app,
         target.copy(
@@ -151,12 +161,6 @@ async def get_message(request: Request) -> dict[str, Any]:
         ),
     )
     return {"ok": True, "reply": reply, "send_result": send_result}
-
-
-@app.post("/sendMessage")
-async def send_message(request: SendMessageRequest) -> dict[str, Any]:
-    result = await _send_message(app, request)
-    return {"ok": True, "result": result}
 
 
 @app.get("/api/dashboard/status")
@@ -176,8 +180,6 @@ async def dashboard_status() -> dict[str, Any]:
         },
         "runtime": {
             "background_workers": bool(getattr(app.state, "background_workers", None)),
-            "scheduler": bool(getattr(app.state, "scheduler_task", None))
-            and not app.state.scheduler_task.done(),
             "napcat": bool(config.get("napcat", {}).get("enabled", False)),
             "redis": bool(config.get("redis", {}).get("enabled", False)),
             "tools": config.get("tools", {}).get("enabled", []),
@@ -188,6 +190,11 @@ async def dashboard_status() -> dict[str, Any]:
         },
         "computer": _computer_status(),
     }
+
+
+@app.get("/api/dashboard/performance")
+async def dashboard_performance(limit: int = 20) -> dict[str, Any]:
+    return performance_snapshot(limit=limit)
 
 
 @app.get("/api/dashboard/models")
@@ -220,6 +227,27 @@ async def update_dashboard_models(request: LLMSettingsRequest) -> dict[str, Any]
     }
 
 
+@app.post("/api/dashboard/models/discover")
+async def discover_dashboard_models(request: ModelDiscoveryRequest) -> dict[str, Any]:
+    models = await _discover_model_names(request)
+    return {"ok": True, "count": len(models), "models": models}
+
+
+@app.get("/api/dashboard/napcat")
+async def dashboard_napcat() -> dict[str, Any]:
+    raw_config = load_raw_config()
+    return {"ok": True, "napcat": _napcat_payload(raw_config)}
+
+
+@app.put("/api/dashboard/napcat")
+async def update_dashboard_napcat(request: NapCatSettingsRequest) -> dict[str, Any]:
+    raw_config = load_raw_config()
+    raw_config["napcat"] = _normalize_napcat_config(request)
+    _write_runtime_config(raw_config)
+    app.state.config = load_config()
+    return {"ok": True, "napcat": _napcat_payload(raw_config)}
+
+
 @app.get("/api/dashboard/skills")
 async def dashboard_skills() -> dict[str, Any]:
     config = app.state.config
@@ -241,6 +269,14 @@ async def upload_skill_package(file: UploadFile = File(...)) -> dict[str, Any]:
     return {"ok": True, "skill": _skill_payload(entry)}
 
 
+@app.patch("/api/dashboard/skills/{skill_id}")
+async def update_skill_enabled(skill_id: str, request: PackageEnabledRequest) -> dict[str, Any]:
+    config = app.state.config
+    updated = _set_skill_enabled(config, skill_id, request.enabled)
+    app.state.config = load_config()
+    return {"ok": True, "skill": _skill_payload(updated)}
+
+
 @app.get("/api/dashboard/styles")
 async def dashboard_styles() -> dict[str, Any]:
     return {"ok": True, "styles": _list_styles(app.state.config)}
@@ -255,6 +291,14 @@ async def upload_style_package(file: UploadFile = File(...)) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "style": style}
+
+
+@app.patch("/api/dashboard/styles/{style_id}")
+async def update_style_enabled(style_id: str, request: PackageEnabledRequest) -> dict[str, Any]:
+    config = app.state.config
+    updated = _set_style_enabled(config, style_id, request.enabled)
+    app.state.config = load_config()
+    return {"ok": True, "style": updated}
 
 
 @app.get("/api/dashboard/mcp")
@@ -298,21 +342,25 @@ async def dashboard_mcp_server_tools(server_name: str) -> dict[str, Any]:
     return {"ok": True, "server": _mcp_server_payload(server), "tools": tool_probe.get("tools", [])}
 
 
-async def _execute_scheduled_task(app: FastAPI, task_content: str) -> None:
-    payload = _parse_scheduled_task_payload(task_content, app.state.last_message_target)
-    if payload is None:
-        await run_agent_once_async(task_content)
-        return
-    reply = await run_agent_once_async(payload.message)
-    await _send_message(
-        app,
-        payload.copy(
-            update={
-                "message": reply.get("message", ""),
-                "image_ref": reply.get("image_ref", ""),
-            }
-        ),
-    )
+@app.post("/{napcat_path:path}")
+async def napcat_configured_endpoint(napcat_path: str, request: Request) -> dict[str, Any]:
+    path = _normalize_api_path(napcat_path)
+    napcat_cfg = app.state.config.get("napcat", {})
+    callback_path = _normalize_api_path(str(napcat_cfg.get("callback_path", "/getMessage") or "/getMessage"))
+    reply_path = _normalize_api_path(str(napcat_cfg.get("reply_path", "/sendMessage") or "/sendMessage"))
+
+    if path == callback_path:
+        return await _handle_napcat_callback(app, request)
+    if path == reply_path:
+        try:
+            payload = await request.json()
+            send_request = SendMessageRequest(**payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid send message payload.") from exc
+        result = await _send_message(app, send_request)
+        return {"ok": True, "result": result}
+
+    raise HTTPException(status_code=404, detail="Not found.")
 
 
 async def _send_message(app: FastAPI, request: SendMessageRequest) -> dict[str, Any]:
@@ -436,7 +484,28 @@ def _skill_payload(item: dict[str, Any]) -> dict[str, Any]:
         "references": item.get("references", []),
         "entry": str(item.get("entry", "") or ""),
         "max_steps": item.get("max_steps", 8),
+        "enabled": bool(item.get("enabled", True)),
     }
+
+
+def _set_skill_enabled(config: dict[str, Any], skill_id: str, enabled: bool) -> dict[str, Any]:
+    normalized = _slugify(skill_id)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="skill_id is required.")
+
+    registry = load_skill_registry(config)
+    updated: dict[str, Any] | None = None
+    for item in registry:
+        if _slugify(str(item.get("id", "") or "")) == normalized:
+            item["enabled"] = bool(enabled)
+            updated = item
+            break
+
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Skill not found.")
+
+    write_skill_registry(config, registry)
+    return updated
 
 
 def _model_config_keys() -> tuple[str, str, str]:
@@ -487,6 +556,135 @@ def _normalize_model_config(request: LLMModelConfigRequest, *, previous: Any) ->
         "name": name,
         "temperature": _safe_float(request.temperature, 0.0),
         "max_output_tokens": max(_safe_int(request.max_output_tokens, 2048), 1),
+    }
+
+
+async def _discover_model_names(request: ModelDiscoveryRequest) -> list[str]:
+    base_url = str(request.base_url or "").strip().rstrip("/")
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Model base_url must be an http(s) URL.")
+
+    api_key = str(request.api_key or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Model api_key is required.")
+    if _looks_like_env_placeholder(api_key) or _looks_like_env_placeholder(base_url):
+        raise HTTPException(
+            status_code=400,
+            detail="Model base_url and api_key must be entered directly before discovering models.",
+        )
+
+    models_url = _model_list_url(base_url)
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
+            response = await client.get(models_url)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response is not None else 400
+        detail = _safe_http_error_detail(exc.response)
+        raise HTTPException(status_code=400, detail=f"Model discovery failed with HTTP {status_code}: {detail}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Model discovery failed: {type(exc).__name__}: {exc}") from exc
+
+    models = _extract_model_names(payload)
+    if not models:
+        raise HTTPException(status_code=400, detail="No models were found in the provider response.")
+    return models
+
+
+def _model_list_url(base_url: str) -> str:
+    text = str(base_url or "").strip().rstrip("/")
+    if text.endswith("/models"):
+        return text
+    if text.endswith("/chat/completions"):
+        return text[: -len("/chat/completions")] + "/models"
+    if text.endswith("/responses"):
+        return text[: -len("/responses")] + "/models"
+    return f"{text}/models"
+
+
+def _extract_model_names(payload: Any) -> list[str]:
+    if isinstance(payload, dict):
+        candidates = payload.get("data")
+        if candidates is None:
+            candidates = payload.get("models")
+        if candidates is None:
+            candidates = payload.get("model")
+    else:
+        candidates = payload
+
+    values: list[str] = []
+    if isinstance(candidates, list):
+        for item in candidates:
+            if isinstance(item, str):
+                values.append(item)
+            elif isinstance(item, dict):
+                model_id = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+                if model_id:
+                    values.append(model_id)
+    elif isinstance(candidates, dict):
+        for key, value in candidates.items():
+            if isinstance(value, dict):
+                model_id = str(value.get("id") or value.get("name") or key).strip()
+                if model_id:
+                    values.append(model_id)
+            elif isinstance(value, str):
+                values.append(value)
+
+    return sorted({value for value in values if value})
+
+
+def _safe_http_error_detail(response: httpx.Response | None) -> str:
+    if response is None:
+        return ""
+    try:
+        payload = response.json()
+    except Exception:
+        return response.text[:300]
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            return str(error.get("message") or error.get("code") or payload)[:300]
+        if error:
+            return str(error)[:300]
+        message = payload.get("message")
+        if message:
+            return str(message)[:300]
+    return str(payload)[:300]
+
+
+def _napcat_payload(config: dict[str, Any]) -> dict[str, Any]:
+    napcat = config.get("napcat", {})
+    if not isinstance(napcat, dict):
+        napcat = {}
+    return {
+        "enabled": bool(napcat.get("enabled", False)),
+        "http_url": str(napcat.get("http_url", "") or ""),
+        "token": str(napcat.get("token", "") or ""),
+        "callback_path": str(napcat.get("callback_path", "/getMessage") or "/getMessage"),
+        "reply_path": str(napcat.get("reply_path", "/sendMessage") or "/sendMessage"),
+        "report_format": str(napcat.get("report_format", "string") or "string"),
+    }
+
+
+def _normalize_napcat_config(request: NapCatSettingsRequest) -> dict[str, Any]:
+    http_url = str(request.http_url or "").strip().rstrip("/")
+    if request.enabled:
+        parsed = urlparse(http_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(status_code=400, detail="NapCat http_url must be an http(s) URL when enabled.")
+    report_format = str(request.report_format or "string").strip().lower()
+    if report_format not in {"string", "array"}:
+        report_format = "string"
+    return {
+        "enabled": bool(request.enabled),
+        "http_url": http_url,
+        "token": str(request.token or "").strip(),
+        "callback_path": _normalize_api_path(request.callback_path or "/getMessage") or "/getMessage",
+        "reply_path": _normalize_api_path(request.reply_path or "/sendMessage") or "/sendMessage",
+        "report_format": report_format,
     }
 
 
@@ -681,21 +879,49 @@ def _list_styles(config: dict[str, Any]) -> list[dict[str, Any]]:
     for item in registry.get("styles", []):
         if not isinstance(item, dict):
             continue
-        style_id = _slugify(str(item.get("id", "") or ""))
-        if not style_id:
-            continue
-        result.append(
-            {
-                "id": style_id,
-                "name": str(item.get("name", style_id) or style_id),
-                "type": str(item.get("type", "custom") or "custom"),
-                "summary": str(item.get("summary", "") or item.get("guide", "") or ""),
-                "path": str(item.get("path", "") or item.get("skill_path", "") or ""),
-                "default": style_id == default_id,
-                "source": str(item.get("source", "") or ("guide" if item.get("guide") else "skill")),
-            }
-        )
+        payload = _style_payload(item, default_id)
+        if payload:
+            result.append(payload)
     return result
+
+
+def _style_payload(item: dict[str, Any], default_id: str = "") -> dict[str, Any]:
+    style_id = _slugify(str(item.get("id", "") or ""))
+    if not style_id:
+        return {}
+    return {
+        "id": style_id,
+        "name": str(item.get("name", style_id) or style_id),
+        "type": str(item.get("type", "custom") or "custom"),
+        "summary": str(item.get("summary", "") or item.get("guide", "") or ""),
+        "path": str(item.get("path", "") or item.get("skill_path", "") or ""),
+        "default": bool(default_id and style_id == default_id),
+        "source": str(item.get("source", "") or ("guide" if item.get("guide") else "skill")),
+        "enabled": bool(item.get("enabled", True)),
+    }
+
+
+def _set_style_enabled(config: dict[str, Any], style_id: str, enabled: bool) -> dict[str, Any]:
+    normalized = _slugify(style_id)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="style_id is required.")
+
+    registry = _read_style_registry(config)
+    default_id = _slugify(str(registry.get("default", "") or config.get("style", {}).get("default", "atri")))
+    updated: dict[str, Any] | None = None
+    for item in registry.get("styles", []):
+        if not isinstance(item, dict):
+            continue
+        if _slugify(str(item.get("id", "") or "")) == normalized:
+            item["enabled"] = bool(enabled)
+            updated = item
+            break
+
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Style not found.")
+
+    _write_style_registry(config, registry)
+    return _style_payload(updated, default_id)
 
 
 def _is_zip_upload(file: UploadFile) -> bool:
@@ -716,6 +942,7 @@ async def _install_skill_zip(config: dict[str, Any], file: UploadFile) -> dict[s
             "summary": str(metadata.get("summary", "") or _read_first_heading(skill_path) or slug),
             "path": _relative_project_path(skill_path),
             "type": str(metadata.get("type", "workflow") or "workflow"),
+            "enabled": True,
         }
         for key in ("entry", "tools", "references", "max_steps"):
             if key in metadata and metadata[key] not in ("", None, [], {}):
@@ -747,12 +974,13 @@ async def _install_style_zip(config: dict[str, Any], file: UploadFile) -> dict[s
             "summary": str(metadata.get("summary", "") or ""),
             "path": _relative_project_path(skill_path),
             "source": "skill",
+            "enabled": True,
         }
         styles.append(style_entry)
         registry["styles"] = styles
         registry.setdefault("default", str(config.get("style", {}).get("default", "atri") or "atri"))
         _write_style_registry(config, registry)
-        return {**style_entry, "default": _slugify(str(registry.get("default", "atri"))) == slug}
+        return _style_payload(style_entry, _slugify(str(registry.get("default", "atri"))))
     finally:
         _cleanup_upload_tree(package_root)
 
@@ -983,29 +1211,15 @@ def _event_to_target(event: dict[str, Any]) -> SendMessageRequest:
     )
 
 
-def _parse_scheduled_task_payload(
-    task_content: str,
-    fallback_target: SendMessageRequest | None,
-) -> SendMessageRequest | None:
-    raw = task_content.strip()
-    if raw.startswith("{") and raw.endswith("}"):
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            payload = None
-        if isinstance(payload, dict):
-            message = str(payload.get("message", "") or payload.get("content", "")).strip()
-            if not message:
-                return None
-            return SendMessageRequest(
-                message_type=str(payload.get("message_type", "private")),
-                user_id=_to_optional_int(payload.get("user_id")),
-                group_id=_to_optional_int(payload.get("group_id")),
-                message=message,
-            )
-    if fallback_target is None:
+def _target_payload(target: SendMessageRequest) -> dict[str, Any] | None:
+    message_type = str(target.message_type or "private").lower()
+    if message_type == "group":
+        if target.group_id is None:
+            return None
+        return {"message_type": "group", "group_id": target.group_id}
+    if target.user_id is None:
         return None
-    return fallback_target.copy(update={"message": raw})
+    return {"message_type": "private", "user_id": target.user_id}
 
 
 def _to_optional_int(value: Any) -> int | None:

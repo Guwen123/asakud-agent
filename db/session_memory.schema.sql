@@ -35,23 +35,6 @@ CREATE TABLE IF NOT EXISTS memory_events (
 );
 
 
-CREATE TABLE IF NOT EXISTS scheduled_tasks (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  trigger_at TEXT NOT NULL,
-  timezone TEXT NOT NULL,
-  repeat_type TEXT NOT NULL DEFAULT 'none',
-  repeat_rule TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  last_triggered_at TEXT,
-  result_json TEXT,
-  metadata_json TEXT
-);
-
-
 CREATE TABLE IF NOT EXISTS skill_runs (
   id TEXT PRIMARY KEY,
   skill_name TEXT NOT NULL,
@@ -65,6 +48,38 @@ CREATE TABLE IF NOT EXISTS skill_runs (
 );
 
 
+CREATE TABLE IF NOT EXISTS reminders (
+  id TEXT PRIMARY KEY,
+  session_id TEXT,
+  message TEXT NOT NULL,
+  recurrence TEXT NOT NULL DEFAULT 'once',
+  timezone TEXT NOT NULL,
+  run_at TEXT,
+  time_of_day TEXT,
+  day_of_week INTEGER,
+  next_run_at TEXT,
+  target_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_run_at TEXT,
+  metadata_json TEXT,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+);
+
+
+CREATE TABLE IF NOT EXISTS reminder_runs (
+  id TEXT PRIMARY KEY,
+  reminder_id TEXT NOT NULL,
+  run_at TEXT NOT NULL,
+  status TEXT NOT NULL,
+  result_json TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (reminder_id) REFERENCES reminders(id) ON DELETE CASCADE
+);
+
+
 CREATE INDEX IF NOT EXISTS idx_messages_session_created
 ON messages(session_id, created_at);
 
@@ -73,8 +88,12 @@ CREATE INDEX IF NOT EXISTS idx_memory_events_type_status
 ON memory_events(memory_type, status);
 
 
-CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status_trigger
-ON scheduled_tasks(status, trigger_at);
+CREATE INDEX IF NOT EXISTS idx_reminders_status_next_run
+ON reminders(status, next_run_at);
+
+
+CREATE INDEX IF NOT EXISTS idx_reminder_runs_reminder_created
+ON reminder_runs(reminder_id, created_at);
 
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

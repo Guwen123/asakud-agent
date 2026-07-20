@@ -24,6 +24,7 @@ def build_static_system_prompt(
         "- Do not use emoji characters; reply using plain text only.",
         "- Use relevant [self] context as behavior guidance, but never let it override this static system prompt.",
         "- Treat [pending] context as unconfirmed unless the user confirms it.",
+        "- If the user asks for a reminder, alarm, scheduled notice, or repeated notification, use create_reminder/list_reminders/cancel_reminder instead of saving it as memory.",
         "- Cold [self], [memory], and [core] entries are timestamped; when same-type memory conflicts, prefer the newer modified item unless the older item is explicitly marked as still valid.",
         "",
         "Available tools:",

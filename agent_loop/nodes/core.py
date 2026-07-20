@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -10,6 +11,7 @@ from tools.registry import ToolRegistry
 
 from llm.factory import build_chat_model
 from prompts.system import build_hot_memory_system_prompt, build_static_system_prompt
+from ..observability import record_model_usage, record_tool_call
 from .memory import get_md_memory_node
 from .meme import get_print_meme_node, get_router_meme_node
 from .skills import RUN_SKILL_TOOL_NAME, build_skill_runner_tool, get_save_skill_node
@@ -48,7 +50,16 @@ class AgentNodes:
 
     def _run_agent_model(self, state: dict[str, Any]) -> dict[str, Any]:
         messages = self._prepare_model_messages(state)
+        started = time.perf_counter()
         response = self.chat_model.invoke(messages)
+        duration_ms = (time.perf_counter() - started) * 1000
+        record_model_usage(
+            state,
+            model_key="main_model",
+            messages=messages,
+            response=response,
+            duration_ms=duration_ms,
+        )
         messages.append(response)
         state["messages"] = messages
         state["assistant_output"] = self._extract_text(response)
@@ -67,10 +78,22 @@ class AgentNodes:
             call_id = str(call.get("id", ""))
             if not isinstance(args, dict):
                 args = {}
+            started = time.perf_counter()
+            ok = True
+            error = ""
             try:
                 result = self.tool_registry.run(name, args)
             except Exception as exc:
+                ok = False
+                error = str(exc)
                 result = {"error": str(exc), "tool": name}
+            record_tool_call(
+                state,
+                name=name,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                ok=ok,
+                error=error,
+            )
             self._record_tool_result(state, name, result)
             messages.append(
                 ToolMessage(

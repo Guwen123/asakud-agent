@@ -6,8 +6,9 @@ from langchain_core.tools import BaseTool
 
 from .fetch_web.fetch import fetch_web
 from .mcp.factory import build_mcp_tools
+from .reminders import cancel_reminder, create_reminder, list_reminders
 
-BUILTIN_TOOLS = [fetch_web]
+BUILTIN_TOOLS = [fetch_web, create_reminder, list_reminders, cancel_reminder]
 
 
 class ToolRegistry:

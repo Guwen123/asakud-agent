@@ -4,13 +4,21 @@ import "./styles.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 const LANGUAGE_STORAGE_KEY = "asakud-dashboard-language";
-const navItems = ["overview", "skills", "styles", "mcp", "settings", "runtime"];
+const navItems = ["overview", "performance", "skills", "styles", "mcp", "napcat", "settings", "runtime"];
 const modelKeys = ["main_model", "route_model", "multimodal_model"];
 const initialMcpForm = {
   name: "my-mcp",
   base_url: "",
   transport: "mcp-jsonrpc",
   authorization: "",
+};
+const initialNapcatForm = {
+  enabled: true,
+  http_url: "http://127.0.0.1:3000",
+  token: "",
+  callback_path: "/getMessage",
+  reply_path: "/sendMessage",
+  report_format: "string",
 };
 const emptyModelSettings = {
   main_model: emptyModelConfig(),
@@ -23,9 +31,11 @@ const I18N = {
     brand: { title: "asakud-agent", subtitle: "Control Dashboard" },
     nav: {
       overview: "Overview",
+      performance: "Performance",
       skills: "Skills",
       styles: "Styles",
       mcp: "MCP Servers",
+      napcat: "NapCat QQ",
       settings: "Settings",
       runtime: "Runtime",
     },
@@ -35,6 +45,15 @@ const I18N = {
       languageSwitch: "中文",
       languageAria: "Switch language to Chinese",
     },
+    pages: {
+      overview: "Agent, computer, and service health at a glance.",
+      performance: "Fine-grained Agent performance traces for node execution, tool latency, and token usage.",
+      performanceTitle: "Performance Monitor",
+      performanceSubtitle: "Recent LangGraph runs, tool calls, and model token consumption.",
+      runtime: "Focused runtime diagnostics for local services and resources.",
+      runtimeTitle: "Runtime Health",
+      runtimeSubtitle: "Background workers, adapters, cache, and MCP status.",
+    },
     notices: {
       connecting: "Connecting to Agent console...",
       synced: "Agent state synchronized.",
@@ -42,9 +61,18 @@ const I18N = {
       installing: (kind, file) => `Installing ${kind} package: ${file}`,
       installed: (kind, file) => `${kind} installed: ${file}`,
       installFailed: (error) => `Install failed: ${error}`,
+      togglingPackage: (kind, name, state) => `${state} ${kind}: ${name}`,
+      packageToggled: (kind, name, state) => `${kind} ${name} is now ${state}.`,
+      packageToggleFailed: (error) => `Toggle failed: ${error}`,
       savingModels: "Saving model settings...",
       modelsSaved: "Model settings saved to agent.config.md.",
       modelSaveFailed: (error) => `Model save failed: ${error}`,
+      discoveringModels: (key) => `Fetching model list for ${key}...`,
+      modelsDiscovered: (key, count) => `${count} models loaded for ${key}.`,
+      modelDiscoverFailed: (error) => `Model discovery failed: ${error}`,
+      savingNapcat: "Saving NapCat QQ settings...",
+      napcatSaved: "NapCat QQ settings saved to agent.config.md.",
+      napcatSaveFailed: (error) => `NapCat save failed: ${error}`,
       addingMcp: (name) => `Adding MCP server: ${name}`,
       mcpSavedTools: (count) => `MCP server saved with ${count} tools.`,
       mcpSavedProbe: (error) => `MCP server saved, but probe failed: ${error}`,
@@ -78,10 +106,32 @@ const I18N = {
       loadUnavailable: "load unavailable",
       memory: "Memory",
       disk: "Disk",
+      traces: "Traces",
+      avgRun: "Avg Run",
+      avgNode: "Avg Node",
+      avgTool: "Avg Tool",
+      tokens: "Tokens",
+      estimatedTokens: "Estimated",
+      slowestNode: "Slowest Node",
+      slowestTool: "Slowest Tool",
+    },
+    performance: {
+      empty: "No Agent traces yet. Send a message to generate runtime metrics.",
+      nodes: "Node timings",
+      tools: "Tool latency",
+      models: "Model calls",
+      noTools: "No tools were called in this trace.",
+      noModels: "No model usage was recorded.",
+      actual: "actual",
+      estimated: "estimated",
+      input: "input",
+      output: "output",
+      total: "total",
+      ok: "ok",
+      failed: "failed",
     },
     runtimeFlags: {
       workers: "Workers",
-      scheduler: "Scheduler",
       napcat: "NapCat",
       redis: "Redis",
       mcp: "MCP",
@@ -98,6 +148,25 @@ const I18N = {
       noSummary: "No summary yet",
       script: "script",
       workflow: "workflow",
+      enabled: "enabled",
+      disabled: "disabled",
+      enable: "Enable",
+      disable: "Disable",
+    },
+    napcat: {
+      subtitle: "Connect a NapCat-compatible QQ HTTP server for callbacks and replies.",
+      title: "NapCat QQ",
+      enabled: "Enable NapCat",
+      httpUrl: "HTTP server URL",
+      token: "Access token (optional)",
+      callbackPath: "Callback path",
+      replyPath: "Reply path",
+      reportFormat: "Report format",
+      save: "Save NapCat",
+      formats: {
+        string: "String messages",
+        array: "Array/CQ segments",
+      },
     },
     mcp: {
       subtitle: "Connect local or remote MCP gateways. New servers are written into agent.config.md.",
@@ -131,6 +200,10 @@ const I18N = {
       baseUrl: "Base URL",
       apiKey: "API Key",
       modelName: "Model Name",
+      discover: "Get Models",
+      discovering: "Loading...",
+      selectPlaceholder: "Select a model",
+      noModels: "Click Get Models first",
       temperature: "Temperature",
       maxTokens: "Max Output Tokens",
     },
@@ -139,9 +212,11 @@ const I18N = {
     brand: { title: "asakud-agent", subtitle: "控制台" },
     nav: {
       overview: "总览",
+      performance: "性能监控",
       skills: "技能",
       styles: "风格",
       mcp: "MCP 服务",
+      napcat: "NapCat QQ",
       settings: "设置",
       runtime: "运行时",
     },
@@ -151,6 +226,15 @@ const I18N = {
       languageSwitch: "EN",
       languageAria: "切换语言为英文",
     },
+    pages: {
+      overview: "快速查看智能体、电脑资源和服务健康状态。",
+      performance: "细粒度查看节点执行时长、工具调用延迟和 Token 消耗。",
+      performanceTitle: "性能监控",
+      performanceSubtitle: "最近的 LangGraph 运行、工具调用和模型 Token 消耗。",
+      runtime: "聚焦本地服务与系统资源的运行诊断。",
+      runtimeTitle: "运行健康",
+      runtimeSubtitle: "后台任务、适配器、缓存和 MCP 状态。",
+    },
     notices: {
       connecting: "正在连接智能体控制台...",
       synced: "智能体状态已同步。",
@@ -158,9 +242,18 @@ const I18N = {
       installing: (kind, file) => `正在安装${kind}包：${file}`,
       installed: (kind, file) => `${kind}已安装：${file}`,
       installFailed: (error) => `安装失败：${error}`,
+      togglingPackage: (kind, name, state) => `正在${state}${kind}：${name}`,
+      packageToggled: (kind, name, state) => `${kind} ${name} 现在是${state}。`,
+      packageToggleFailed: (error) => `切换失败：${error}`,
       savingModels: "正在保存模型设置...",
       modelsSaved: "模型设置已保存到 agent.config.md。",
       modelSaveFailed: (error) => `模型保存失败：${error}`,
+      discoveringModels: (key) => `正在获取 ${key} 的模型列表...`,
+      modelsDiscovered: (key, count) => `${key} 已加载 ${count} 个模型。`,
+      modelDiscoverFailed: (error) => `模型发现失败：${error}`,
+      savingNapcat: "正在保存 NapCat QQ 设置...",
+      napcatSaved: "NapCat QQ 设置已保存到 agent.config.md。",
+      napcatSaveFailed: (error) => `NapCat 保存失败：${error}`,
       addingMcp: (name) => `正在添加 MCP 服务：${name}`,
       mcpSavedTools: (count) => `MCP 服务已保存，加载到 ${count} 个工具。`,
       mcpSavedProbe: (error) => `MCP 服务已保存，但探测失败：${error}`,
@@ -194,10 +287,32 @@ const I18N = {
       loadUnavailable: "负载不可用",
       memory: "内存",
       disk: "磁盘",
+      traces: "Trace",
+      avgRun: "平均运行",
+      avgNode: "平均节点",
+      avgTool: "平均工具",
+      tokens: "Token",
+      estimatedTokens: "估算",
+      slowestNode: "最慢节点",
+      slowestTool: "最慢工具",
+    },
+    performance: {
+      empty: "还没有 Agent 运行记录。发送一条消息后会生成性能指标。",
+      nodes: "节点耗时",
+      tools: "工具延迟",
+      models: "模型调用",
+      noTools: "本次 trace 没有调用工具。",
+      noModels: "本次 trace 没有记录模型用量。",
+      actual: "实际",
+      estimated: "估算",
+      input: "输入",
+      output: "输出",
+      total: "总量",
+      ok: "成功",
+      failed: "失败",
     },
     runtimeFlags: {
       workers: "后台任务",
-      scheduler: "调度器",
       napcat: "NapCat",
       redis: "Redis",
       mcp: "MCP",
@@ -214,6 +329,25 @@ const I18N = {
       noSummary: "暂无摘要",
       script: "脚本",
       workflow: "流程",
+      enabled: "已启用",
+      disabled: "已禁用",
+      enable: "启用",
+      disable: "禁用",
+    },
+    napcat: {
+      subtitle: "连接兼容 NapCat 的 QQ HTTP 服务，用于接收回调和发送回复。",
+      title: "NapCat QQ",
+      enabled: "启用 NapCat",
+      httpUrl: "HTTP 服务地址",
+      token: "访问 Token（可选）",
+      callbackPath: "回调路径",
+      replyPath: "回复路径",
+      reportFormat: "上报格式",
+      save: "保存 NapCat",
+      formats: {
+        string: "字符串消息",
+        array: "数组 / CQ 段",
+      },
     },
     mcp: {
       subtitle: "连接本地或远程 MCP 网关。新服务会写入 agent.config.md。",
@@ -247,6 +381,10 @@ const I18N = {
       baseUrl: "Base URL",
       apiKey: "API Key",
       modelName: "模型名称",
+      discover: "获取模型",
+      discovering: "加载中...",
+      selectPlaceholder: "选择模型",
+      noModels: "请先点击获取模型",
       temperature: "温度",
       maxTokens: "最大输出 Token",
     },
@@ -279,31 +417,46 @@ function App() {
   const [styles, setStyles] = useState([]);
   const [models, setModels] = useState(emptyModelSettings);
   const [modelForm, setModelForm] = useState(emptyModelSettings);
+  const [modelOptions, setModelOptions] = useState({});
+  const [modelLoading, setModelLoading] = useState({});
+  const [napcat, setNapcat] = useState(initialNapcatForm);
+  const [napcatForm, setNapcatForm] = useState(initialNapcatForm);
   const [mcp, setMcp] = useState({ enabled: false, servers: [] });
   const [mcpTools, setMcpTools] = useState({});
   const [mcpForm, setMcpForm] = useState(initialMcpForm);
+  const [performance, setPerformance] = useState({ summary: {}, traces: [] });
   const [active, setActive] = useState("overview");
   const [notice, setNotice] = useState(() => I18N[getInitialLanguage()].notices.connecting);
   const modelDirtyRef = useRef(false);
+  const napcatDirtyRef = useRef(false);
 
   async function refresh() {
     try {
-      const [statusRes, skillsRes, stylesRes, mcpRes, modelsRes] = await Promise.all([
+      const [statusRes, skillsRes, stylesRes, mcpRes, napcatRes, modelsRes, performanceRes] = await Promise.all([
         fetch(`${API_BASE}/api/dashboard/status`),
         fetch(`${API_BASE}/api/dashboard/skills`),
         fetch(`${API_BASE}/api/dashboard/styles`),
         fetch(`${API_BASE}/api/dashboard/mcp`),
+        fetch(`${API_BASE}/api/dashboard/napcat`),
         fetch(`${API_BASE}/api/dashboard/models`),
+        fetch(`${API_BASE}/api/dashboard/performance?limit=20`),
       ]);
       const statusData = await statusRes.json();
       const skillsData = await skillsRes.json();
       const stylesData = await stylesRes.json();
       const mcpData = await mcpRes.json();
+      const napcatData = await napcatRes.json();
       const modelsData = await modelsRes.json();
+      const performanceData = await performanceRes.json();
       setStatus(statusData);
       setSkills(skillsData.skills || []);
       setStyles(stylesData.styles || []);
       setMcp(mcpData || { enabled: false, servers: [] });
+      setPerformance(performanceData || { summary: {}, traces: [] });
+      setNapcat(napcatData.napcat || initialNapcatForm);
+      if (!napcatDirtyRef.current) {
+        setNapcatForm(napcatData.napcat || initialNapcatForm);
+      }
       setModels(modelsData.models || emptyModelSettings);
       if (!modelDirtyRef.current) {
         setModelForm(modelsData.models || emptyModelSettings);
@@ -325,6 +478,11 @@ function App() {
     const nextLang = lang === "en" ? "zh" : "en";
     setLang(nextLang);
     setNotice(I18N[nextLang].notices.languageSwitched);
+  }
+
+  function noticeMessage(key, ...args) {
+    const value = copy.notices[key] || I18N.en.notices[key];
+    return typeof value === "function" ? value(...args) : value;
   }
 
   async function uploadPackage(kind, file) {
@@ -349,6 +507,32 @@ function App() {
     }
   }
 
+  async function togglePackageEnabled(kind, item) {
+    const id = item?.id || "";
+    if (!id) return;
+    const kindLabel = copy.kinds[kind] || kind;
+    const name = item.name || id;
+    const nextEnabled = item.enabled === false;
+    const actionLabel = nextEnabled ? copy.packages.enable : copy.packages.disable;
+    const stateLabel = nextEnabled ? copy.packages.enabled : copy.packages.disabled;
+    setNotice(copy.notices.togglingPackage(kindLabel, name, actionLabel));
+    try {
+      const response = await fetch(`${API_BASE}/api/dashboard/${kind}/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.detail || "Toggle failed");
+      }
+      setNotice(copy.notices.packageToggled(kindLabel, name, stateLabel));
+      await refresh();
+    } catch (error) {
+      setNotice(copy.notices.packageToggleFailed(error.message));
+    }
+  }
+
   function updateModelField(modelKey, field, value) {
     modelDirtyRef.current = true;
     setModelForm((current) => ({
@@ -358,6 +542,66 @@ function App() {
         [field]: value,
       },
     }));
+  }
+
+  async function discoverModels(modelKey) {
+    const item = modelForm[modelKey] || emptyModelConfig();
+    setNotice(noticeMessage("discoveringModels", copy.models.keys[modelKey] || modelKey));
+    setModelLoading((current) => ({ ...current, [modelKey]: true }));
+    try {
+      const response = await fetch(`${API_BASE}/api/dashboard/models/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: item.provider || "custom",
+          protocol: item.protocol || "openai-compatible",
+          base_url: item.base_url || "",
+          api_key: item.api_key || "",
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.detail || "Failed to fetch model list");
+      }
+      const nextOptions = Array.isArray(payload.models) ? payload.models : [];
+      setModelOptions((current) => ({ ...current, [modelKey]: nextOptions }));
+      if (!item.name && nextOptions.length) {
+        updateModelField(modelKey, "name", nextOptions[0]);
+      }
+      setNotice(noticeMessage("modelsDiscovered", copy.models.keys[modelKey] || modelKey, nextOptions.length));
+    } catch (error) {
+      setNotice(noticeMessage("modelDiscoverFailed", error.message));
+    } finally {
+      setModelLoading((current) => ({ ...current, [modelKey]: false }));
+    }
+  }
+
+  function updateNapcatForm(nextForm) {
+    napcatDirtyRef.current = true;
+    setNapcatForm(nextForm);
+  }
+
+  async function saveNapcat(event) {
+    event.preventDefault();
+    setNotice(copy.notices.savingNapcat);
+    try {
+      const response = await fetch(`${API_BASE}/api/dashboard/napcat`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(napcatForm),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.detail || "Failed to save NapCat settings");
+      }
+      setNapcat(payload.napcat || napcatForm);
+      setNapcatForm(payload.napcat || napcatForm);
+      napcatDirtyRef.current = false;
+      setNotice(copy.notices.napcatSaved);
+      await refresh();
+    } catch (error) {
+      setNotice(copy.notices.napcatSaveFailed(error.message));
+    }
   }
 
   async function saveModels(event) {
@@ -433,6 +677,79 @@ function App() {
   const runtime = status?.runtime || {};
   const agent = status?.agent || {};
 
+  function renderActivePanel() {
+    switch (active) {
+      case "skills":
+        return (
+          <PackagePanel
+            copy={copy}
+            title={copy.packages.skillTitle}
+            subtitle={copy.packages.skillSubtitle}
+            count={skills.length}
+            items={skills}
+            emptyText={copy.packages.skillEmpty}
+            onUpload={(file) => uploadPackage("skills", file)}
+            onToggle={(item) => togglePackageEnabled("skills", item)}
+          />
+        );
+      case "styles":
+        return (
+          <PackagePanel
+            copy={copy}
+            title={copy.packages.styleTitle}
+            subtitle={copy.packages.styleSubtitle}
+            count={styles.length}
+            items={styles}
+            emptyText={copy.packages.styleEmpty}
+            onUpload={(file) => uploadPackage("styles", file)}
+            onToggle={(item) => togglePackageEnabled("styles", item)}
+          />
+        );
+      case "mcp":
+        return (
+          <McpPanel
+            copy={copy}
+            mcp={mcp}
+            toolsByServer={mcpTools}
+            form={mcpForm}
+            setForm={setMcpForm}
+            onSubmit={addMcpServer}
+            onProbe={probeMcpServer}
+          />
+        );
+      case "napcat":
+        return (
+          <NapcatPanel
+            copy={copy}
+            napcat={napcat}
+            form={napcatForm}
+            setForm={updateNapcatForm}
+            onSubmit={saveNapcat}
+          />
+        );
+      case "settings":
+        return (
+          <ModelSettingsPanel
+            copy={copy}
+            models={models}
+            form={modelForm}
+            modelOptions={modelOptions}
+            modelLoading={modelLoading}
+            onChange={updateModelField}
+            onDiscover={discoverModels}
+            onSubmit={saveModels}
+          />
+        );
+      case "performance":
+        return <PerformancePanel copy={copy} performance={performance} />;
+      case "runtime":
+        return <RuntimePanel copy={copy} computer={computer} runtime={runtime} />;
+      case "overview":
+      default:
+        return <OverviewPanel copy={copy} agent={agent} computer={computer} runtime={runtime} />;
+    }
+  }
+
   return (
     <main className="shell">
       <aside className="sidebar">
@@ -468,71 +785,238 @@ function App() {
           </div>
         </header>
 
-        {active === "settings" ? (
-          <ModelSettingsPanel
-            copy={copy}
-            models={models}
-            form={modelForm}
-            onChange={updateModelField}
-            onSubmit={saveModels}
-          />
-        ) : (
-          <>
-            <section className="hero-grid">
-              <AgentCard copy={copy} agent={agent} runtime={runtime} />
-              <SystemCard copy={copy} computer={computer} />
-              <MetricCard
-                title={copy.metrics.cpu}
-                value={computer.cpu?.cores || 0}
-                unit={copy.metrics.cores}
-                sub={computer.cpu?.load_average?.join(" / ") || copy.metrics.loadUnavailable}
-              />
-              <RingCard title={copy.metrics.memory} value={computer.memory?.percent} detail={`${computer.memory?.used_mb || 0} / ${computer.memory?.total_mb || 0} MB`} />
-              <RingCard title={copy.metrics.disk} value={computer.disk?.percent} detail={`${computer.disk?.used_mb || 0} / ${computer.disk?.total_mb || 0} MB`} />
-            </section>
-
-            <section className="switch-row">
-              <StatusTile label={copy.runtimeFlags.workers} active={runtime.background_workers} />
-              <StatusTile label={copy.runtimeFlags.scheduler} active={runtime.scheduler} />
-              <StatusTile label={copy.runtimeFlags.napcat} active={runtime.napcat} />
-              <StatusTile label={copy.runtimeFlags.redis} active={runtime.redis} />
-              <StatusTile label={copy.runtimeFlags.mcp} active={runtime.mcp} />
-            </section>
-
-            <section className="management-grid">
-              <PackagePanel
-                copy={copy}
-                title={copy.packages.skillTitle}
-                subtitle={copy.packages.skillSubtitle}
-                count={skills.length}
-                items={skills}
-                emptyText={copy.packages.skillEmpty}
-                onUpload={(file) => uploadPackage("skills", file)}
-              />
-              <PackagePanel
-                copy={copy}
-                title={copy.packages.styleTitle}
-                subtitle={copy.packages.styleSubtitle}
-                count={styles.length}
-                items={styles}
-                emptyText={copy.packages.styleEmpty}
-                onUpload={(file) => uploadPackage("styles", file)}
-              />
-            </section>
-
-            <McpPanel
-              copy={copy}
-              mcp={mcp}
-              toolsByServer={mcpTools}
-              form={mcpForm}
-              setForm={setMcpForm}
-              onSubmit={addMcpServer}
-              onProbe={probeMcpServer}
-            />
-          </>
-        )}
+        {renderActivePanel()}
       </section>
     </main>
+  );
+}
+
+function OverviewPanel({ copy, agent, computer, runtime }) {
+  return (
+    <div className="page-stack">
+      <p className="page-intro">{copy.pages.overview}</p>
+      <section className="hero-grid">
+        <AgentCard copy={copy} agent={agent} runtime={runtime} />
+        <SystemCard copy={copy} computer={computer} />
+        <MetricCard
+          title={copy.metrics.cpu}
+          value={computer.cpu?.cores || 0}
+          unit={copy.metrics.cores}
+          sub={computer.cpu?.load_average?.join(" / ") || copy.metrics.loadUnavailable}
+        />
+        <RingCard
+          title={copy.metrics.memory}
+          value={computer.memory?.percent}
+          detail={`${computer.memory?.used_mb || 0} / ${computer.memory?.total_mb || 0} MB`}
+        />
+        <RingCard
+          title={copy.metrics.disk}
+          value={computer.disk?.percent}
+          detail={`${computer.disk?.used_mb || 0} / ${computer.disk?.total_mb || 0} MB`}
+        />
+      </section>
+      <RuntimeFlags copy={copy} runtime={runtime} />
+    </div>
+  );
+}
+
+function PerformancePanel({ copy, performance }) {
+  const summary = performance?.summary || {};
+  const traces = performance?.traces || [];
+  const slowestNode = summary.slowest_node || {};
+  const slowestTool = summary.slowest_tool || {};
+  const totalTokens = Number(summary.total_tokens || 0);
+  const estimatedTokens = Number(summary.estimated_total_tokens || 0);
+
+  return (
+    <div className="page-stack">
+      <p className="page-intro">{copy.pages.performance}</p>
+      <article className="card performance-card">
+        <div className="panel-head">
+          <div>
+            <p>{copy.pages.performanceSubtitle}</p>
+            <h2>{copy.pages.performanceTitle}</h2>
+          </div>
+          <span>{summary.trace_count || 0}</span>
+        </div>
+        <section className="perf-summary-grid">
+          <PerfStat title={copy.metrics.traces} value={summary.trace_count || 0} unit="" />
+          <PerfStat title={copy.metrics.avgRun} value={formatMs(summary.avg_total_duration_ms)} unit="ms" />
+          <PerfStat title={copy.metrics.avgNode} value={formatMs(summary.avg_node_duration_ms)} unit="ms" />
+          <PerfStat title={copy.metrics.avgTool} value={formatMs(summary.avg_tool_latency_ms)} unit="ms" />
+          <PerfStat title={copy.metrics.tokens} value={totalTokens || estimatedTokens} unit={totalTokens ? copy.performance.actual : copy.performance.estimated} />
+        </section>
+        <section className="bottleneck-grid">
+          <BottleneckCard title={copy.metrics.slowestNode} item={slowestNode} />
+          <BottleneckCard title={copy.metrics.slowestTool} item={slowestTool} />
+        </section>
+      </article>
+
+      <section className="trace-list">
+        {traces.length === 0 && <div className="empty">{copy.performance.empty}</div>}
+        {traces.map((trace) => (
+          <TraceCard key={trace.trace_id} copy={copy} trace={trace} />
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function PerfStat({ title, value, unit }) {
+  return (
+    <article className="perf-stat">
+      <p>{title}</p>
+      <strong>{value}</strong>
+      {unit && <small>{unit}</small>}
+    </article>
+  );
+}
+
+function BottleneckCard({ title, item }) {
+  const name = item?.name || "-";
+  const duration = item?.duration_ms != null ? `${formatMs(item.duration_ms)} ms` : "-";
+  return (
+    <article className="bottleneck-card">
+      <p>{title}</p>
+      <strong>{name}</strong>
+      <small>{duration}</small>
+    </article>
+  );
+}
+
+function TraceCard({ copy, trace }) {
+  const tokens = trace.tokens || {};
+  const actualTotal = Number(tokens.total_tokens || 0);
+  const estimatedTotal = Number(tokens.estimated_total_tokens || 0);
+  const displayTotal = actualTotal || estimatedTotal;
+
+  return (
+    <article className="card trace-card">
+      <div className="trace-head">
+        <div>
+          <strong>{shortTraceId(trace.trace_id)}</strong>
+          <small>{trace.started_at || "-"}</small>
+        </div>
+        <div className="trace-pills">
+          <span>{formatMs(trace.total_duration_ms)} ms</span>
+          <span>{trace.node_count || 0} nodes</span>
+          <span>{trace.tool_count || 0} tools</span>
+          <span>{displayTotal} tokens</span>
+        </div>
+      </div>
+
+      <div className="token-row">
+        <span>{copy.performance.actual}: {copy.performance.input} {tokens.input_tokens || 0} / {copy.performance.output} {tokens.output_tokens || 0} / {copy.performance.total} {tokens.total_tokens || 0}</span>
+        <span>{copy.performance.estimated}: {copy.performance.input} {tokens.estimated_input_tokens || 0} / {copy.performance.output} {tokens.estimated_output_tokens || 0} / {copy.performance.total} {tokens.estimated_total_tokens || 0}</span>
+      </div>
+
+      <TraceSection title={copy.performance.nodes} items={trace.nodes || []} emptyText="-" />
+      <TraceSection title={copy.performance.tools} items={trace.tools || []} emptyText={copy.performance.noTools} copy={copy} />
+      <ModelCallSection title={copy.performance.models} calls={trace.model_calls || []} emptyText={copy.performance.noModels} />
+    </article>
+  );
+}
+
+function TraceSection({ title, items, emptyText, copy }) {
+  return (
+    <section className="trace-section">
+      <h3>{title}</h3>
+      {items.length === 0 && <small>{emptyText}</small>}
+      <div className="timing-list">
+        {items.map((item, index) => (
+          <div className="timing-item" key={`${item.name}-${index}`}>
+            <span>{item.name || "-"}</span>
+            <strong>{formatMs(item.duration_ms)} ms</strong>
+            {copy && <em className={item.ok === false ? "failed" : "ok"}>{item.ok === false ? copy.performance.failed : copy.performance.ok}</em>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ModelCallSection({ title, calls, emptyText }) {
+  return (
+    <section className="trace-section">
+      <h3>{title}</h3>
+      {calls.length === 0 && <small>{emptyText}</small>}
+      <div className="timing-list">
+        {calls.map((item, index) => (
+          <div className="timing-item model-call" key={`${item.model_key}-${index}`}>
+            <span>{item.model_key || "model"}</span>
+            <strong>{formatMs(item.duration_ms)} ms</strong>
+            <em>{item.total_tokens || item.estimated_total_tokens || 0} tokens</em>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function formatMs(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return "0";
+  if (number >= 1000) return number.toFixed(0);
+  return number.toFixed(1);
+}
+
+function shortTraceId(value) {
+  const text = String(value || "");
+  return text ? `trace-${text.slice(0, 8)}` : "trace";
+}
+
+function RuntimePanel({ copy, computer, runtime }) {
+  const activeCount = [
+    runtime.background_workers,
+    runtime.napcat,
+    runtime.redis,
+    runtime.mcp,
+  ].filter(Boolean).length;
+
+  return (
+    <div className="page-stack">
+      <p className="page-intro">{copy.pages.runtime}</p>
+      <article className="card runtime-card">
+        <div className="panel-head">
+          <div>
+            <p>{copy.pages.runtimeSubtitle}</p>
+            <h2>{copy.pages.runtimeTitle}</h2>
+          </div>
+          <span>{activeCount}/4</span>
+        </div>
+        <RuntimeFlags copy={copy} runtime={runtime} compact />
+      </article>
+      <section className="runtime-grid">
+        <SystemCard copy={copy} computer={computer} />
+        <MetricCard
+          title={copy.metrics.cpu}
+          value={computer.cpu?.cores || 0}
+          unit={copy.metrics.cores}
+          sub={computer.cpu?.load_average?.join(" / ") || copy.metrics.loadUnavailable}
+        />
+        <RingCard
+          title={copy.metrics.memory}
+          value={computer.memory?.percent}
+          detail={`${computer.memory?.used_mb || 0} / ${computer.memory?.total_mb || 0} MB`}
+        />
+        <RingCard
+          title={copy.metrics.disk}
+          value={computer.disk?.percent}
+          detail={`${computer.disk?.used_mb || 0} / ${computer.disk?.total_mb || 0} MB`}
+        />
+      </section>
+    </div>
+  );
+}
+
+function RuntimeFlags({ copy, runtime, compact = false }) {
+  return (
+    <section className={compact ? "switch-row compact" : "switch-row"}>
+      <StatusTile label={copy.runtimeFlags.workers} active={runtime.background_workers} />
+      <StatusTile label={copy.runtimeFlags.napcat} active={runtime.napcat} />
+      <StatusTile label={copy.runtimeFlags.redis} active={runtime.redis} />
+      <StatusTile label={copy.runtimeFlags.mcp} active={runtime.mcp} />
+    </section>
   );
 }
 
@@ -607,14 +1091,8 @@ function StatusTile({ label, active }) {
   );
 }
 
-function PackagePanel({ copy, title, subtitle, count, items, emptyText, onUpload }) {
-  const [dragging, setDragging] = useState(false);
-
-  function handleDrop(event) {
-    event.preventDefault();
-    setDragging(false);
-    onUpload(event.dataTransfer.files?.[0]);
-  }
+function PackagePanel({ copy, title, subtitle, count, items, emptyText, onUpload, onToggle }) {
+  const fileInputRef = useRef(null);
 
   return (
     <article className="card package-panel">
@@ -623,34 +1101,43 @@ function PackagePanel({ copy, title, subtitle, count, items, emptyText, onUpload
           <p>{subtitle}</p>
           <h2>{title}</h2>
         </div>
-        <span>{count}</span>
+        <div className="panel-actions">
+          <span>{count}</span>
+          <button className="upload-button" type="button" onClick={() => fileInputRef.current?.click()}>
+            {copy.packages.addZip}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip"
+            onChange={(event) => {
+              onUpload(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+        </div>
       </div>
-
-      <label
-        className={dragging ? "drop-zone dragging" : "drop-zone"}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={handleDrop}
-      >
-        <input type="file" accept=".zip" onChange={(event) => onUpload(event.target.files?.[0])} />
-        <strong>{copy.packages.addZip}</strong>
-        <small>{copy.packages.dropHint}</small>
-      </label>
 
       <div className="package-list">
         {items.length === 0 && <div className="empty">{emptyText}</div>}
-        {items.map((item) => (
-          <div className="package-item" key={item.id}>
-            <div>
-              <strong>{item.name || item.id}</strong>
-              <small>{item.summary || item.path || copy.packages.noSummary}</small>
+        {items.map((item) => {
+          const enabled = item.enabled !== false;
+          return (
+            <div className={enabled ? "package-item" : "package-item disabled"} key={item.id}>
+              <div>
+                <strong>{item.name || item.id}</strong>
+                <small>{item.summary || item.path || copy.packages.noSummary}</small>
+              </div>
+              <div className="package-actions">
+                <span>{item.entry ? copy.packages.script : item.source || item.type || copy.packages.workflow}</span>
+                <em className={enabled ? "package-state on" : "package-state"}>{enabled ? copy.packages.enabled : copy.packages.disabled}</em>
+                <button type="button" onClick={() => onToggle?.(item)}>
+                  {enabled ? copy.packages.disable : copy.packages.enable}
+                </button>
+              </div>
             </div>
-            <span>{item.entry ? copy.packages.script : item.source || item.type || copy.packages.workflow}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </article>
   );
@@ -707,7 +1194,53 @@ function McpPanel({ copy, mcp, toolsByServer, form, setForm, onSubmit, onProbe }
   );
 }
 
-function ModelSettingsPanel({ copy, models, form, onChange, onSubmit }) {
+function NapcatPanel({ copy, napcat, form, setForm, onSubmit }) {
+  const enabled = form.enabled !== false;
+  return (
+    <article className="card napcat-panel">
+      <div className="panel-head">
+        <div>
+          <p>{copy.napcat.subtitle}</p>
+          <h2>{copy.napcat.title}</h2>
+        </div>
+        <span>{napcat.enabled ? copy.packages.enabled : copy.packages.disabled}</span>
+      </div>
+
+      <form className="napcat-form" onSubmit={onSubmit}>
+        <label className="toggle-field">
+          <input type="checkbox" checked={enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />
+          <span>{copy.napcat.enabled}</span>
+        </label>
+        <label>
+          <span>{copy.napcat.httpUrl}</span>
+          <input value={form.http_url || ""} onChange={(event) => setForm({ ...form, http_url: event.target.value })} placeholder="http://127.0.0.1:3000" />
+        </label>
+        <label>
+          <span>{copy.napcat.token}</span>
+          <input value={form.token || ""} onChange={(event) => setForm({ ...form, token: event.target.value })} placeholder="optional token" />
+        </label>
+        <label>
+          <span>{copy.napcat.callbackPath}</span>
+          <input value={form.callback_path || ""} onChange={(event) => setForm({ ...form, callback_path: event.target.value })} placeholder="/getMessage" />
+        </label>
+        <label>
+          <span>{copy.napcat.replyPath}</span>
+          <input value={form.reply_path || ""} onChange={(event) => setForm({ ...form, reply_path: event.target.value })} placeholder="/sendMessage" />
+        </label>
+        <label>
+          <span>{copy.napcat.reportFormat}</span>
+          <select value={form.report_format || "string"} onChange={(event) => setForm({ ...form, report_format: event.target.value })}>
+            <option value="string">{copy.napcat.formats.string}</option>
+            <option value="array">{copy.napcat.formats.array}</option>
+          </select>
+        </label>
+        <button className="refresh model-save" type="submit">{copy.napcat.save}</button>
+      </form>
+    </article>
+  );
+}
+
+function ModelSettingsPanel({ copy, models, form, modelOptions, modelLoading, onChange, onDiscover, onSubmit }) {
   return (
     <article className="card model-panel">
       <div className="panel-head">
@@ -721,6 +1254,9 @@ function ModelSettingsPanel({ copy, models, form, onChange, onSubmit }) {
       <form className="model-form" onSubmit={onSubmit}>
         {modelKeys.map((key) => {
           const item = form[key] || models[key] || emptyModelConfig();
+          const rawOptions = modelOptions[key] || [];
+          const options = item.name && !rawOptions.includes(item.name) ? [item.name, ...rawOptions] : rawOptions;
+          const isLoading = Boolean(modelLoading[key]);
           return (
             <section className="model-card" key={key}>
               <div>
@@ -739,10 +1275,20 @@ function ModelSettingsPanel({ copy, models, form, onChange, onSubmit }) {
                 <span>{copy.models.apiKey}</span>
                 <input value={item.api_key || ""} onChange={(event) => onChange(key, "api_key", event.target.value)} placeholder="your-api-key" />
               </label>
-              <label>
-                <span>{copy.models.modelName}</span>
-                <input value={item.name || ""} onChange={(event) => onChange(key, "name", event.target.value)} placeholder="gpt-4.1-mini" />
-              </label>
+              <div className="model-select-row">
+                <label>
+                  <span>{copy.models.modelName}</span>
+                  <select value={item.name || ""} onChange={(event) => onChange(key, "name", event.target.value)}>
+                    <option value="">{options.length ? (copy.models.selectPlaceholder || I18N.en.models.selectPlaceholder) : (copy.models.noModels || I18N.en.models.noModels)}</option>
+                    {options.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </label>
+                <button className="model-discover" type="button" onClick={() => onDiscover(key)} disabled={isLoading}>
+                  {isLoading ? (copy.models.discovering || I18N.en.models.discovering) : (copy.models.discover || I18N.en.models.discover)}
+                </button>
+              </div>
               <label>
                 <span>{copy.models.temperature}</span>
                 <input type="number" step="0.1" value={item.temperature ?? 0} onChange={(event) => onChange(key, "temperature", Number(event.target.value))} />

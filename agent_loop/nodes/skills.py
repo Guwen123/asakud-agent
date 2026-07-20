@@ -199,6 +199,7 @@ def load_skill_registry(config: dict[str, Any]) -> list[dict[str, Any]]:
             "summary": summary,
             "path": path,
             "type": str(item.get("type", "workflow") or "workflow").strip(),
+            "enabled": bool(item.get("enabled", True)),
         }
         for key in ("entry", "tools", "references", "max_steps"):
             if key in item:
@@ -397,6 +398,8 @@ def _skill_config_path(config: dict[str, Any]) -> Path:
 def load_runtime_skill_registry(config: dict[str, Any]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for item in load_skill_registry(config):
+        if not bool(item.get("enabled", True)):
+            continue
         if item["id"] not in {entry["id"] for entry in result}:
             result.append(item)
     return result
@@ -594,6 +597,7 @@ def _registry_entry_payload(item: dict[str, Any]) -> dict[str, Any]:
         "summary": str(item.get("summary", "") or "").strip(),
         "path": str(item.get("path", "") or "").strip(),
         "type": str(item.get("type", "workflow") or "workflow").strip(),
+        "enabled": bool(item.get("enabled", True)),
     }
     for key in ("entry", "tools", "references", "max_steps"):
         if key in item and item[key] not in ("", None, [], {}):

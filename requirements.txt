@@ -8,3 +8,4 @@ httpx
 langchain-openai
 playwright
 redis
+langsmith

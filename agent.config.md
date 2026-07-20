@@ -13,13 +13,12 @@ The program reads the fenced `json` block below as its runtime configuration.
   "server": {
     "host": "127.0.0.1",
     "port": 8000,
-    "reload": false,
-    "scheduler_interval_seconds": 30
+    "reload": false
   },
   "napcat": {
     "enabled": true,
     "http_url": "http://127.0.0.1:3000",
-    "token": "${NAPCAT_TOKEN}",
+    "token": "",
     "callback_path": "/getMessage",
     "reply_path": "/sendMessage",
     "report_format": "string"
@@ -184,8 +183,9 @@ The program reads the fenced `json` block below as its runtime configuration.
         "sessions",
         "messages",
         "memory_events",
-        "scheduled_tasks",
-        "skill_runs"
+        "skill_runs",
+        "reminders",
+        "reminder_runs"
       ],
       "enable_message_fts": true
     }
@@ -223,6 +223,13 @@ The program reads the fenced `json` block below as its runtime configuration.
     "auto_collect_probability": 0.35,
     "send_probability": 0.25
   },
+  "reminders": {
+    "enabled": true,
+    "poll_interval_seconds": 30,
+    "due_batch_size": 20,
+    "retry_delay_seconds": 300,
+    "default_timezone": "Asia/Shanghai"
+  },
   "mcp": {
     "enabled": false,
     "default_server": "",
@@ -256,7 +263,10 @@ The program reads the fenced `json` block below as its runtime configuration.
     "directory": "tools",
     "auto_load": true,
     "enabled": [
-      "fetch_web"
+      "fetch_web",
+      "create_reminder",
+      "list_reminders",
+      "cancel_reminder"
     ]
   }
 }

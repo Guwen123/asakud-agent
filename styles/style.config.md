@@ -10,7 +10,8 @@
       "type": "roleplay",
       "summary": "Default ATRI response style used as the final style layer.",
       "path": "styles/atri/SKILL.md",
-      "source": "skill"
+      "source": "skill",
+      "enabled": true
     },
     {
       "id": "plain",
@@ -18,7 +19,8 @@
       "type": "plain",
       "summary": "Neutral, concise assistant tone.",
       "guide": "Use a neutral, concise assistant tone. Prioritize clarity, accuracy, and directness.",
-      "source": "guide"
+      "source": "guide",
+      "enabled": true
     }
   ]
 }

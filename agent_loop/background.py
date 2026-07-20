@@ -7,6 +7,7 @@ from typing import Any
 
 from memory.hot_store import get_hot_store
 from memory_worker.agent import MemoryWorker
+from reminders.worker import ReminderWorker
 from skill_builder.agent import SkillBuilderWorker
 
 
@@ -38,6 +39,7 @@ class BackgroundWorkerManager:
         self._tasks = [
             asyncio.create_task(self._run_memory_worker(), name="memory_worker"),
             asyncio.create_task(self._run_skill_builder(), name="skill_builder"),
+            asyncio.create_task(self._run_reminder_worker(), name="reminder_worker"),
         ]
 
     def update_config(self, config: dict[str, Any]) -> None:
@@ -90,6 +92,16 @@ class BackgroundWorkerManager:
                 print(f"[skill_builder] error: {exc}")
             finally:
                 self.skill_queue.task_done()
+
+    async def _run_reminder_worker(self) -> None:
+        while not self._stop:
+            try:
+                worker = ReminderWorker(self.config)
+                await asyncio.to_thread(worker.tick)
+            except Exception as exc:
+                print(f"[reminder_worker] error: {exc}")
+            interval = int(self.config.get("reminders", {}).get("poll_interval_seconds", 30) or 30)
+            await asyncio.sleep(max(interval, 1))
 
 
 def start_background_workers(config: dict[str, Any]) -> BackgroundWorkerManager:
