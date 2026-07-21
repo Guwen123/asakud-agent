@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any
 
@@ -49,6 +50,24 @@ class AgentNodes:
         return get_style_node(self.config)
 
     def _run_agent_model(self, state: dict[str, Any]) -> dict[str, Any]:
+        if self._should_force_fetch_web(state):
+            messages = list(state.get("messages", []))
+            messages.append(
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "fetch_web",
+                            "args": {"query": self._current_user_text(state)},
+                            "id": "forced_fetch_web",
+                        }
+                    ],
+                )
+            )
+            state["messages"] = messages
+            state["assistant_output"] = ""
+            return state
+
         messages = self._prepare_model_messages(state)
         started = time.perf_counter()
         response = self.chat_model.invoke(messages)
@@ -137,6 +156,43 @@ class AgentNodes:
         if hot_prompt:
             messages.append(SystemMessage(content=hot_prompt))
         return messages
+
+    def _should_force_fetch_web(self, state: dict[str, Any]) -> bool:
+        if "fetch_web" not in self.tool_registry.names():
+            return False
+        if self._has_called_tool(state, "fetch_web"):
+            return False
+        text = self._current_user_text(state)
+        if not text:
+            return False
+        return bool(
+            re.search(
+                r"(搜索|搜一下|查一下|查找|联网|网页|爬取|抓取|最新|当前信息|current|latest|search|browse|crawl|fetch|look\s+up)",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+
+    @staticmethod
+    def _current_user_text(state: dict[str, Any]) -> str:
+        text = str(state.get("user_input", "") or "").strip()
+        if text:
+            return text
+        for message in reversed(list(state.get("messages", []) or [])):
+            if isinstance(message, HumanMessage) and not AgentNodes._is_recent_summary_message(message):
+                content = getattr(message, "content", "")
+                return content if isinstance(content, str) else str(content)
+        return ""
+
+    @staticmethod
+    def _has_called_tool(state: dict[str, Any], tool_name: str) -> bool:
+        for message in list(state.get("messages", []) or []):
+            if not isinstance(message, AIMessage):
+                continue
+            for call in message.tool_calls or []:
+                if str(call.get("name", "") or "") == tool_name:
+                    return True
+        return False
 
     @staticmethod
     def _strip_system_prefix(messages: list[Any]) -> list[Any]:

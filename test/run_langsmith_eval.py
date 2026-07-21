@@ -105,7 +105,7 @@ def main() -> int:
     results = client.evaluate(
         target,
         data=dataset_name,
-        evaluators=[contract_assertions_evaluator, response_shape_evaluator],
+        evaluators=[contract_assertions_evaluator, response_shape_evaluator, latency_breakdown_evaluator],
         experiment_prefix=args.experiment_prefix,
         max_concurrency=max(int(args.max_concurrency or 1), 1),
     )
@@ -184,6 +184,42 @@ def response_shape_evaluator(outputs: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def latency_breakdown_evaluator(outputs: dict[str, Any]) -> list[dict[str, Any]]:
+    trace = _performance_trace(outputs)
+    if not trace:
+        return [
+            {
+                "key": "performance_trace_present",
+                "score": 0,
+                "comment": "debug.performance is missing; run without --no-debug and keep WorkflowState.performance.",
+            }
+        ]
+
+    nodes = _dict_items(trace.get("nodes", []))
+    tools = _dict_items(trace.get("tools", []))
+    models = _dict_items(trace.get("model_calls", []))
+    tokens = trace.get("tokens", {}) if isinstance(trace.get("tokens", {}), dict) else {}
+    slowest_node = _slowest_duration_item(nodes, "name")
+    slowest_tool = _slowest_duration_item(tools, "name")
+    slowest_model = _slowest_duration_item(models, "model_key")
+
+    return [
+        {"key": "performance_trace_present", "score": 1, "comment": str(trace.get("trace_id", "") or "")},
+        {"key": "trace_total_ms", "score": _number(trace.get("total_duration_ms"))},
+        {"key": "node_total_ms", "score": _sum_duration(nodes)},
+        {"key": "tool_total_ms", "score": _sum_duration(tools)},
+        {"key": "model_total_ms", "score": _sum_duration(models)},
+        {"key": "slowest_node_ms", "score": slowest_node["duration_ms"], "comment": slowest_node["label"]},
+        {"key": "slowest_tool_ms", "score": slowest_tool["duration_ms"], "comment": slowest_tool["label"]},
+        {"key": "slowest_model_ms", "score": slowest_model["duration_ms"], "comment": slowest_model["label"]},
+        {"key": "node_count", "score": float(len(nodes))},
+        {"key": "tool_count", "score": float(len(tools))},
+        {"key": "model_call_count", "score": float(len(models))},
+        {"key": "actual_total_tokens", "score": _number(tokens.get("total_tokens"))},
+        {"key": "estimated_total_tokens", "score": _number(tokens.get("estimated_total_tokens"))},
+    ]
+
+
 def create_langsmith_dataset(client: Any, *, dataset_name: str, cases: list[dict[str, Any]]) -> Any:
     dataset = client.create_dataset(
         dataset_name=dataset_name,
@@ -225,6 +261,39 @@ def dataset_name_for(base_name: str, *, cases: list[dict[str, Any]]) -> str:
     categories = sorted({str(case.get("category", "") or "uncategorized") for case in cases})
     suffix = "-".join(categories[:3]) if categories else "empty"
     return f"{base_name}-{suffix}-{stamp}"
+
+
+def _performance_trace(outputs: dict[str, Any]) -> dict[str, Any]:
+    debug = outputs.get("debug", {}) if isinstance(outputs.get("debug", {}), dict) else {}
+    trace = debug.get("performance", {}) if isinstance(debug.get("performance", {}), dict) else {}
+    return trace
+
+
+def _dict_items(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _sum_duration(items: list[dict[str, Any]]) -> float:
+    return round(sum(_number(item.get("duration_ms")) for item in items), 3)
+
+
+def _slowest_duration_item(items: list[dict[str, Any]], label_key: str) -> dict[str, Any]:
+    if not items:
+        return {"label": "", "duration_ms": 0.0}
+    item = max(items, key=lambda candidate: _number(candidate.get("duration_ms")))
+    return {
+        "label": str(item.get(label_key, "") or item.get("name", "") or ""),
+        "duration_ms": _number(item.get("duration_ms")),
+    }
+
+
+def _number(value: Any) -> float:
+    try:
+        return round(float(value or 0.0), 3)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def langsmith_dependency_error() -> str:

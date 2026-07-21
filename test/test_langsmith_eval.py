@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from run_langsmith_eval import case_to_langsmith_example, contract_assertions_evaluator, response_shape_evaluator
+from run_langsmith_eval import (
+    case_to_langsmith_example,
+    contract_assertions_evaluator,
+    latency_breakdown_evaluator,
+    response_shape_evaluator,
+)
 
 
 class LangSmithEvalTests(unittest.TestCase):
@@ -55,6 +60,41 @@ class LangSmithEvalTests(unittest.TestCase):
         by_key = {item["key"]: item["score"] for item in scores}
         self.assertEqual(by_key["has_message"], 1)
         self.assertEqual(by_key["latency_seconds"], 1.25)
+
+    def test_latency_breakdown_evaluator_returns_trace_metrics(self) -> None:
+        scores = latency_breakdown_evaluator(
+            {
+                "debug": {
+                    "performance": {
+                        "trace_id": "trace-1",
+                        "total_duration_ms": 123.4,
+                        "nodes": [
+                            {"name": "fast", "duration_ms": 10},
+                            {"name": "slow", "duration_ms": 25},
+                        ],
+                        "tools": [{"name": "fetch_web", "duration_ms": 50}],
+                        "model_calls": [{"model_key": "main_model", "duration_ms": 40}],
+                        "tokens": {"total_tokens": 12, "estimated_total_tokens": 18},
+                    }
+                }
+            }
+        )
+
+        by_key = {item["key"]: item for item in scores}
+        self.assertEqual(by_key["performance_trace_present"]["score"], 1)
+        self.assertEqual(by_key["trace_total_ms"]["score"], 123.4)
+        self.assertEqual(by_key["node_total_ms"]["score"], 35.0)
+        self.assertEqual(by_key["tool_total_ms"]["score"], 50.0)
+        self.assertEqual(by_key["model_total_ms"]["score"], 40.0)
+        self.assertEqual(by_key["slowest_node_ms"]["comment"], "slow")
+        self.assertEqual(by_key["slowest_tool_ms"]["comment"], "fetch_web")
+        self.assertEqual(by_key["actual_total_tokens"]["score"], 12.0)
+
+    def test_latency_breakdown_evaluator_reports_missing_trace(self) -> None:
+        scores = latency_breakdown_evaluator({"message": "hello"})
+
+        self.assertEqual(scores[0]["key"], "performance_trace_present")
+        self.assertEqual(scores[0]["score"], 0)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,16 @@ class WebCrawlRecord:
     metadata: dict[str, Any] | None
 
 
+@dataclass(frozen=True)
+class PerformanceTraceRecord:
+    id: str
+    session_id: str | None
+    started_at: str
+    finished_at: str | None
+    total_duration_ms: float
+    trace: dict[str, Any]
+
+
 class RuntimeStore:
     def __init__(self, database_path: Path, schema_path: Path) -> None:
         self.database_path = database_path
@@ -168,6 +178,33 @@ class RuntimeStore:
         self.conn.commit()
         return crawl_id
 
+    def add_performance_trace(self, trace: dict[str, Any]) -> str:
+        trace_id = str(trace.get("trace_id", "") or new_id())
+        session_id = str(trace.get("session_id", "") or "") or None
+        started_at = str(trace.get("started_at", "") or now_iso())
+        finished_at = str(trace.get("finished_at", "") or "") or None
+        total_duration_ms = _safe_float(trace.get("total_duration_ms"))
+        if session_id:
+            self.create_session(session_id=session_id, title="performance trace session", started_at=started_at)
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO performance_traces(
+                id, session_id, started_at, finished_at, total_duration_ms, trace_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trace_id,
+                session_id,
+                started_at,
+                finished_at,
+                total_duration_ms,
+                json.dumps(trace, ensure_ascii=False),
+            ),
+        )
+        self.conn.commit()
+        return trace_id
+
     def get_messages(self, session_id: str, limit: int | None = None) -> list[MessageRecord]:
         if limit is None:
             rows = self.conn.execute(
@@ -218,10 +255,10 @@ class RuntimeStore:
             for row in rows
         ]
 
-    def list_web_crawls(self, limit: int = 20) -> list[WebCrawlRecord]:
+    def list_web_crawls(self, limit: int = 20, offset: int = 0) -> list[WebCrawlRecord]:
         rows = self.conn.execute(
-            "SELECT * FROM web_crawls ORDER BY created_at DESC LIMIT ?",
-            (limit,),
+            "SELECT * FROM web_crawls ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ).fetchall()
         return [
             WebCrawlRecord(
@@ -237,6 +274,32 @@ class RuntimeStore:
             for row in rows
         ]
 
+    def count_web_crawls(self) -> int:
+        row = self.conn.execute("SELECT COUNT(*) AS count FROM web_crawls").fetchone()
+        return int(row["count"] if row is not None else 0)
+
+    def delete_web_crawl(self, crawl_id: str) -> bool:
+        cursor = self.conn.execute("DELETE FROM web_crawls WHERE id = ?", (crawl_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def list_performance_traces(self, limit: int = 20, offset: int = 0) -> list[PerformanceTraceRecord]:
+        rows = self.conn.execute(
+            "SELECT * FROM performance_traces ORDER BY started_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [
+            PerformanceTraceRecord(
+                id=row["id"],
+                session_id=row["session_id"],
+                started_at=row["started_at"],
+                finished_at=row["finished_at"],
+                total_duration_ms=_safe_float(row["total_duration_ms"]),
+                trace=_load_trace_json(row["trace_json"], row["id"]),
+            )
+            for row in rows
+        ]
+
 
 def _load_json(value: str | None) -> dict[str, Any] | None:
     if not value:
@@ -246,3 +309,21 @@ def _load_json(value: str | None) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _load_trace_json(value: str | None, trace_id: str) -> dict[str, Any]:
+    payload = _load_json(value)
+    if payload is None:
+        return {"trace_id": trace_id, "nodes": [], "tools": [], "model_calls": []}
+    payload.setdefault("trace_id", trace_id)
+    payload.setdefault("nodes", [])
+    payload.setdefault("tools", [])
+    payload.setdefault("model_calls", [])
+    return payload
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0

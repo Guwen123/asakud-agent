@@ -281,12 +281,13 @@ def write_markdown_report(path: Path, results: list[CaseResult]) -> None:
         f"- Failed: {failed}",
         f"- Skipped: {skipped}",
         "",
-        "| Case | Category | Status | Seconds | Notes |",
-        "| --- | --- | --- | ---: | --- |",
+        "| Case | Category | Status | Seconds | Trace ms | Tool ms | Model ms | Notes |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for item in results:
         status = "skipped" if item.skipped else ("passed" if item.passed else "failed")
         notes = item.error or "; ".join(item.failures) or "-"
+        perf = _performance_summary(item.output)
         lines.append(
             "| "
             + " | ".join(
@@ -295,6 +296,9 @@ def write_markdown_report(path: Path, results: list[CaseResult]) -> None:
                     _escape_table(item.category),
                     status,
                     f"{item.elapsed_seconds:.3f}",
+                    f"{perf['trace_total_ms']:.1f}",
+                    f"{perf['tool_total_ms']:.1f}",
+                    f"{perf['model_total_ms']:.1f}",
                     _escape_table(notes),
                 ]
             )
@@ -305,6 +309,31 @@ def write_markdown_report(path: Path, results: list[CaseResult]) -> None:
 
 def _escape_table(value: str) -> str:
     return str(value or "").replace("|", "\\|").replace("\n", " ")
+
+
+def _performance_summary(output: dict[str, Any]) -> dict[str, float]:
+    debug = output.get("debug", {}) if isinstance(output.get("debug", {}), dict) else {}
+    trace = debug.get("performance", {}) if isinstance(debug.get("performance", {}), dict) else {}
+    tools = _dict_items(trace.get("tools", []))
+    models = _dict_items(trace.get("model_calls", []))
+    return {
+        "trace_total_ms": _safe_float(trace.get("total_duration_ms")),
+        "tool_total_ms": sum(_safe_float(item.get("duration_ms")) for item in tools),
+        "model_total_ms": sum(_safe_float(item.get("duration_ms")) for item in models),
+    }
+
+
+def _dict_items(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 if __name__ == "__main__":

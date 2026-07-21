@@ -61,6 +61,17 @@ CREATE TABLE IF NOT EXISTS web_crawls (
 );
 
 
+CREATE TABLE IF NOT EXISTS performance_traces (
+  id TEXT PRIMARY KEY,
+  session_id TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  total_duration_ms REAL NOT NULL DEFAULT 0,
+  trace_json TEXT NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+);
+
+
 CREATE TABLE IF NOT EXISTS reminders (
   id TEXT PRIMARY KEY,
   session_id TEXT,
@@ -101,16 +112,20 @@ CREATE INDEX IF NOT EXISTS idx_memory_events_type_status
 ON memory_events(memory_type, status);
 
 
+CREATE INDEX IF NOT EXISTS idx_web_crawls_created
+ON web_crawls(created_at);
+
+
+CREATE INDEX IF NOT EXISTS idx_performance_traces_started
+ON performance_traces(started_at);
+
+
 CREATE INDEX IF NOT EXISTS idx_reminders_status_next_run
 ON reminders(status, next_run_at);
 
 
 CREATE INDEX IF NOT EXISTS idx_reminder_runs_reminder_created
 ON reminder_runs(reminder_id, created_at);
-
-
-CREATE INDEX IF NOT EXISTS idx_web_crawls_created
-ON web_crawls(created_at);
 
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

@@ -62,6 +62,12 @@ class EvaluatorTests(unittest.TestCase):
 
         self.assertEqual(score_output(output, assertions), [])
 
+    def test_sentence_count_assertion(self) -> None:
+        output = {"message": "LangGraph is a graph runtime.\nIt manages stateful workflows.\nIt is useful for agents."}
+        assertions = {"min_sentence_count": 3, "max_sentence_count": 3}
+
+        self.assertEqual(score_output(output, assertions), [])
+
 
 if __name__ == "__main__":
     unittest.main()

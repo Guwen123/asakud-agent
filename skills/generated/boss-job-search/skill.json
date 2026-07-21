@@ -1,0 +1,14 @@
+{
+  "id": "boss-job-search",
+  "summary": "在 Boss 直聘等网页来源查询岗位信息，并按关键词、城市、薪资等条件整理岗位列表。",
+  "type": "workflow",
+  "tools": [
+    "fetch_web"
+  ],
+  "entry": "scripts/entry.py:run",
+  "references": [
+    "reference/query_rules.md"
+  ],
+  "max_steps": 8,
+  "generated": true
+}

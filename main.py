@@ -25,7 +25,7 @@ from agent_loop.bootstrap import bootstrap
 from agent_loop.config_loader import load_config, load_raw_config, project_path
 from agent_loop.loop import run_agent_once_async
 from agent_loop.nodes.skills import load_skill_registry, write_skill_registry
-from agent_loop.observability import performance_snapshot
+from agent_loop.observability import summarize_traces
 from db.runtime import RuntimeStore
 from tools.mcp.factory import DEFAULT_MCP_SERVER, configured_mcp_servers, list_mcp_server_tools
 
@@ -194,24 +194,57 @@ async def dashboard_status() -> dict[str, Any]:
 
 
 @app.get("/api/dashboard/performance")
-async def dashboard_performance(limit: int = 20) -> dict[str, Any]:
-    return performance_snapshot(limit=limit)
-
-
-@app.get("/api/dashboard/crawls")
-async def dashboard_crawls(limit: int = 20) -> dict[str, Any]:
-    safe_limit = max(1, min(int(limit or 20), 100))
+async def dashboard_performance(limit: int = 10) -> dict[str, Any]:
+    safe_limit = max(1, min(int(limit or 10), 50))
     store = _new_runtime_store(app.state.config)
     store.initialize()
     try:
-        crawls = store.list_web_crawls(limit=safe_limit)
+        trace_records = store.list_performance_traces(limit=safe_limit)
+    finally:
+        store.close()
+    traces = [_performance_trace_payload(item) for item in trace_records]
+    return {
+        "ok": True,
+        "source": "sqlite",
+        "summary": summarize_traces(traces),
+        "traces": traces,
+    }
+
+
+@app.get("/api/dashboard/crawls")
+async def dashboard_crawls(limit: int = 10, page: int = 1) -> dict[str, Any]:
+    safe_limit = max(1, min(int(limit or 10), 10))
+    safe_page = max(1, int(page or 1))
+    offset = (safe_page - 1) * safe_limit
+    store = _new_runtime_store(app.state.config)
+    store.initialize()
+    try:
+        total = store.count_web_crawls()
+        crawls = store.list_web_crawls(limit=safe_limit, offset=offset)
     finally:
         store.close()
     return {
         "ok": True,
         "count": len(crawls),
+        "total": total,
+        "page": safe_page,
+        "limit": safe_limit,
+        "total_pages": max(1, (total + safe_limit - 1) // safe_limit),
         "crawls": [_web_crawl_payload(item) for item in crawls],
     }
+
+
+@app.delete("/api/dashboard/crawls/{crawl_id}")
+async def delete_dashboard_crawl(crawl_id: str) -> dict[str, Any]:
+    store = _new_runtime_store(app.state.config)
+    store.initialize()
+    try:
+        deleted = store.delete_web_crawl(crawl_id)
+    finally:
+        store.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Crawl record not found")
+    return {"ok": True, "deleted": crawl_id}
 
 
 @app.get("/api/dashboard/models")
@@ -1140,6 +1173,20 @@ def _web_crawl_payload(record: Any) -> dict[str, Any]:
         "created_at": record.created_at,
         "metadata": record.metadata or {},
     }
+
+
+def _performance_trace_payload(record: Any) -> dict[str, Any]:
+    trace = dict(record.trace or {})
+    trace.setdefault("trace_id", record.id)
+    trace.setdefault("session_id", record.session_id or "")
+    trace.setdefault("started_at", record.started_at)
+    trace.setdefault("finished_at", record.finished_at or "")
+    trace.setdefault("total_duration_ms", record.total_duration_ms)
+    trace.setdefault("nodes", [])
+    trace.setdefault("tools", [])
+    trace.setdefault("model_calls", [])
+    trace.setdefault("tokens", {})
+    return trace
 
 
 def _extract_text(message: Any) -> str:

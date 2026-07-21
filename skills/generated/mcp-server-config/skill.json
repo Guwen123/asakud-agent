@@ -1,0 +1,14 @@
+{
+  "id": "mcp-server-config",
+  "summary": "查询并整理新增 MCP Server 的配置字段、传输方式和示例 JSON。",
+  "type": "workflow",
+  "tools": [
+    "fetch_web"
+  ],
+  "entry": "scripts/entry.py:run",
+  "references": [
+    "reference/mcp_config_notes.md"
+  ],
+  "max_steps": 8,
+  "generated": true
+}

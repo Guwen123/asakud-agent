@@ -1,0 +1,14 @@
+{
+  "id": "web-concept-summary",
+  "summary": "联网查询某个概念、产品或技术，并按指定句数生成简洁总结。",
+  "type": "workflow",
+  "tools": [
+    "fetch_web"
+  ],
+  "entry": "scripts/entry.py:run",
+  "references": [
+    "reference/search_summary_rules.md"
+  ],
+  "max_steps": 6,
+  "generated": true
+}

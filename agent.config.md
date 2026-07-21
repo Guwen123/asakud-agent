@@ -24,29 +24,29 @@ The program reads the fenced `json` block below as its runtime configuration.
     "report_format": "string"
   },
   "main_model": {
-    "provider": "custom",
+    "provider": "asxs",
     "protocol": "openai-compatible",
-    "base_url": "",
-    "api_key": "",
-    "name": "mimo-v2.5-pro",
+    "base_url": "https://api.asxs.top/v1",
+    "api_key": "sk-2019a98bde0fe9a7acea8275322f8a13",
+    "name": "gpt-5.5",
     "temperature": 0.2,
     "max_output_tokens": 4096
   },
   "route_model": {
-    "provider": "custom",
+    "provider": "asxs",
     "protocol": "openai-compatible",
-    "base_url": "",
-    "api_key": "",
-    "name": "mimo-v2.5",
+    "base_url": "https://api.asxs.top/v1",
+    "api_key": "sk-2019a98bde0fe9a7acea8275322f8a13",
+    "name": "gpt-5.5",
     "temperature": 0.0,
     "max_output_tokens": 512
   },
   "multimodal_model": {
-    "provider": "custom",
+    "provider": "asxs",
     "protocol": "openai-compatible",
-    "base_url": "",
-    "api_key": "",
-    "name": "mimo-v2-omni",
+    "base_url": "https://api.asxs.top/v1",
+    "api_key": "sk-2019a98bde0fe9a7acea8275322f8a13",
+    "name": "gpt-5.5",
     "temperature": 0.0,
     "max_output_tokens": 1024
   },
@@ -185,6 +185,7 @@ The program reads the fenced `json` block below as its runtime configuration.
         "memory_events",
         "skill_runs",
         "web_crawls",
+        "performance_traces",
         "reminders",
         "reminder_runs"
       ],

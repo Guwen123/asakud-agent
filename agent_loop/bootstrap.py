@@ -71,6 +71,17 @@ CREATE TABLE IF NOT EXISTS web_crawls (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
 );
 """,
+    "performance_traces": """
+CREATE TABLE IF NOT EXISTS performance_traces (
+  id TEXT PRIMARY KEY,
+  session_id TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  total_duration_ms REAL NOT NULL DEFAULT 0,
+  trace_json TEXT NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+);
+""",
     "reminders": """
 CREATE TABLE IF NOT EXISTS reminders (
   id TEXT PRIMARY KEY,
@@ -126,6 +137,10 @@ ON reminder_runs(reminder_id, created_at);
     "web_crawls": """
 CREATE INDEX IF NOT EXISTS idx_web_crawls_created
 ON web_crawls(created_at);
+""",
+    "performance_traces": """
+CREATE INDEX IF NOT EXISTS idx_performance_traces_started
+ON performance_traces(started_at);
 """,
 }
 

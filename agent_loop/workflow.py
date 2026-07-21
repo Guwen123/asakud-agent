@@ -36,6 +36,7 @@ class AgentWorkflow:
             db_snapshot: dict[str, Any]
             history_turn_count: int
             tool_step_count: int
+            performance: dict[str, Any]
 
         workflow = StateGraph(WorkflowState)
         workflow.add_node("import_db", self._timed_node("import_db", RunnableLambda(self._import_db_state)))
@@ -80,6 +81,7 @@ class AgentWorkflow:
             result = time_node(state, name, runnable.invoke)
             if finalize:
                 finalize_trace(result)
+                self._persist_performance_trace(result)
             return result
 
         return RunnableLambda(_run)
@@ -194,6 +196,21 @@ class AgentWorkflow:
         db_config.setdefault("database", self.config["paths"]["database"])
         db_config.setdefault("schema", self.config["paths"]["schema"])
         return RuntimeStore(project_path(db_config["database"]), project_path(db_config["schema"]))
+
+    def _persist_performance_trace(self, state: dict[str, Any]) -> None:
+        trace = state.get("performance")
+        if not isinstance(trace, dict):
+            return
+        store = self._new_store()
+        try:
+            store.initialize()
+            store.add_performance_trace(trace)
+            state["performance_persisted"] = True
+        except Exception as exc:
+            # Observability persistence must never break the user-facing answer.
+            state["performance_persist_error"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            store.close()
 
     def _max_tool_steps(self) -> int:
         try:

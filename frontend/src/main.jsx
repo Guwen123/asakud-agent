@@ -85,6 +85,9 @@ const I18N = {
       mcpTools: (name, count) => `MCP server ${name} returned ${count} tools.`,
       mcpProbeFailed: (error) => `MCP probe failed: ${error}`,
       languageSwitched: "Language switched to English.",
+      deletingCrawl: "Deleting crawl record...",
+      crawlDeleted: "Crawl record deleted.",
+      crawlDeleteFailed: (error) => `Delete failed: ${error}`,
     },
     kinds: { skills: "Skill", styles: "Style" },
     agent: {
@@ -142,6 +145,12 @@ const I18N = {
       status: "Status",
       ok: "ok",
       failed: "failed",
+      delete: "Delete",
+      expand: "Expand full result",
+      collapse: "Collapse result",
+      previous: "Previous",
+      next: "Next",
+      pageInfo: (page, totalPages, total) => `Page ${page} / ${totalPages} · ${total} records`,
       count: (count) => `${count} crawls`,
     },
     runtimeFlags: {
@@ -280,6 +289,9 @@ const I18N = {
       mcpTools: (name, count) => `MCP 服务 ${name} 返回 ${count} 个工具。`,
       mcpProbeFailed: (error) => `MCP 探测失败：${error}`,
       languageSwitched: "已切换为中文。",
+      deletingCrawl: "正在删除爬取记录...",
+      crawlDeleted: "爬取记录已删除。",
+      crawlDeleteFailed: (error) => `删除失败：${error}`,
     },
     kinds: { skills: "Skill", styles: "Style" },
     agent: {
@@ -337,6 +349,12 @@ const I18N = {
       status: "状态",
       ok: "成功",
       failed: "失败",
+      delete: "删除",
+      expand: "展开完整结果",
+      collapse: "收起结果",
+      previous: "上一页",
+      next: "下一页",
+      pageInfo: (page, totalPages, total) => `第 ${page} / ${totalPages} 页 · 共 ${total} 条`,
       count: (count) => `${count} 条记录`,
     },
     runtimeFlags: {
@@ -454,6 +472,8 @@ function App() {
   const [mcpForm, setMcpForm] = useState(initialMcpForm);
   const [performance, setPerformance] = useState({ summary: {}, traces: [] });
   const [crawls, setCrawls] = useState([]);
+  const [crawlMeta, setCrawlMeta] = useState({ page: 1, limit: 10, total: 0, total_pages: 1 });
+  const [crawlPage, setCrawlPage] = useState(1);
   const [active, setActive] = useState("overview");
   const [notice, setNotice] = useState(() => I18N[getInitialLanguage()].notices.connecting);
   const modelDirtyRef = useRef(false);
@@ -468,8 +488,8 @@ function App() {
         fetch(`${API_BASE}/api/dashboard/mcp`),
         fetch(`${API_BASE}/api/dashboard/napcat`),
         fetch(`${API_BASE}/api/dashboard/models`),
-        fetch(`${API_BASE}/api/dashboard/performance?limit=20`),
-        fetch(`${API_BASE}/api/dashboard/crawls?limit=20`),
+        fetch(`${API_BASE}/api/dashboard/performance?limit=10`),
+        fetch(`${API_BASE}/api/dashboard/crawls?limit=10&page=${crawlPage}`),
       ]);
       const statusData = await statusRes.json();
       const skillsData = await skillsRes.json();
@@ -485,6 +505,12 @@ function App() {
       setMcp(mcpData || { enabled: false, servers: [] });
       setPerformance(performanceData || { summary: {}, traces: [] });
       setCrawls(crawlsData.crawls || []);
+      setCrawlMeta({
+        page: crawlsData.page || crawlPage,
+        limit: crawlsData.limit || 10,
+        total: crawlsData.total || 0,
+        total_pages: crawlsData.total_pages || 1,
+      });
       setNapcat(napcatData.napcat || initialNapcatForm);
       if (!napcatDirtyRef.current) {
         setNapcatForm(napcatData.napcat || initialNapcatForm);
@@ -504,7 +530,7 @@ function App() {
     refresh();
     const timer = window.setInterval(refresh, 8000);
     return () => window.clearInterval(timer);
-  }, [lang]);
+  }, [lang, crawlPage]);
 
   function toggleLanguage() {
     const nextLang = lang === "en" ? "zh" : "en";
@@ -705,6 +731,29 @@ function App() {
     }
   }
 
+  async function deleteCrawlRecord(item) {
+    const id = item?.id || "";
+    if (!id) return;
+    setNotice(copy.notices.deletingCrawl);
+    try {
+      const response = await fetch(`${API_BASE}/api/dashboard/crawls/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.detail || "Delete failed");
+      }
+      setNotice(copy.notices.crawlDeleted);
+      if (crawls.length <= 1 && crawlPage > 1) {
+        setCrawlPage((page) => Math.max(1, page - 1));
+      } else {
+        await refresh();
+      }
+    } catch (error) {
+      setNotice(copy.notices.crawlDeleteFailed(error.message));
+    }
+  }
+
   const computer = status?.computer || {};
   const runtime = status?.runtime || {};
   const agent = status?.agent || {};
@@ -773,7 +822,15 @@ function App() {
           />
         );
       case "research":
-        return <ResearchPanel copy={copy} crawls={crawls} />;
+        return (
+          <ResearchPanel
+            copy={copy}
+            crawls={crawls}
+            meta={crawlMeta}
+            onDelete={deleteCrawlRecord}
+            onPageChange={setCrawlPage}
+          />
+        );
       case "performance":
         return <PerformancePanel copy={copy} performance={performance} />;
       case "runtime":
@@ -854,8 +911,17 @@ function OverviewPanel({ copy, agent, computer, runtime }) {
   );
 }
 
-function ResearchPanel({ copy, crawls }) {
+function ResearchPanel({ copy, crawls, meta, onDelete, onPageChange }) {
   const items = Array.isArray(crawls) ? crawls : [];
+  const [expanded, setExpanded] = useState({});
+  const page = Number(meta?.page || 1);
+  const totalPages = Number(meta?.total_pages || 1);
+  const total = Number(meta?.total || items.length);
+
+  function toggleExpanded(id) {
+    setExpanded((current) => ({ ...current, [id]: !current[id] }));
+  }
+
   return (
     <div className="page-stack">
       <p className="page-intro">{copy.pages.research}</p>
@@ -865,17 +931,26 @@ function ResearchPanel({ copy, crawls }) {
             <p>{copy.pages.researchSubtitle}</p>
             <h2>{copy.pages.researchTitle}</h2>
           </div>
-          <span>{copy.research.count(items.length)}</span>
+          <span>{copy.research.count(total)}</span>
         </div>
       </article>
       <section className="crawl-list">
         {items.length === 0 && <div className="empty">{copy.research.empty}</div>}
-        {items.map((item) => (
-          <article className={`card crawl-card ${item.ok === false ? "failed" : ""}`} key={item.id}>
-            <div className="crawl-head">
-              <div>
-                <small>{copy.research.query}</small>
-                <strong>{item.query || "-"}</strong>
+        {items.map((item) => {
+          const fullText = String(item.ok === false ? item.error : item.result || "");
+          const isExpanded = Boolean(expanded[item.id]);
+          const isLong = fullText.length > 700;
+          const displayText = isExpanded || !isLong ? fullText : shortText(fullText, 700);
+          return (
+            <article className={`card crawl-card ${item.ok === false ? "failed" : ""}`} key={item.id}>
+              <div className="crawl-head">
+                <div>
+                  <small>{copy.research.query}</small>
+                  <strong>{item.query || "-"}</strong>
+                </div>
+                <div className="crawl-actions">
+                  <button type="button" onClick={() => onDelete(item)}>{copy.research.delete}</button>
+                </div>
               </div>
               <div className="crawl-meta">
                 <span>{copy.research.date}: {formatDateTime(item.created_at)}</span>
@@ -883,14 +958,28 @@ function ResearchPanel({ copy, crawls }) {
                   {copy.research.status}: {item.ok === false ? copy.research.failed : copy.research.ok}
                 </em>
               </div>
-            </div>
-            <div className="crawl-result">
-              <small>{copy.research.result}</small>
-              <p>{shortText(item.ok === false ? item.error : item.result, 900) || "-"}</p>
-            </div>
-          </article>
-        ))}
+              <div className="crawl-result">
+                <small>{copy.research.result}</small>
+                <p className={isExpanded ? "expanded" : ""}>{displayText || "-"}</p>
+                {isLong && (
+                  <button className="text-toggle" type="button" onClick={() => toggleExpanded(item.id)}>
+                    {isExpanded ? copy.research.collapse : copy.research.expand}
+                  </button>
+                )}
+              </div>
+            </article>
+          );
+        })}
       </section>
+      <div className="pagination-bar">
+        <button type="button" disabled={page <= 1} onClick={() => onPageChange(Math.max(1, page - 1))}>
+          {copy.research.previous}
+        </button>
+        <span>{copy.research.pageInfo(page, totalPages, total)}</span>
+        <button type="button" disabled={page >= totalPages} onClick={() => onPageChange(Math.min(totalPages, page + 1))}>
+          {copy.research.next}
+        </button>
+      </div>
     </div>
   );
 }

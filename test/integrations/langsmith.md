@@ -37,6 +37,11 @@ Implemented evaluators:
 - `contract_assertions`: reuses local assertions from `test/evaluators.py`, including response content, forbidden leakage, tool-call requirements, and max tool steps.
 - `has_message`: checks whether the Agent produced a non-empty user-facing answer.
 - `latency_seconds`: records local target function latency as a numeric metric.
+- `performance_trace_present`: checks whether `debug.performance` was preserved in the final Agent output.
+- `trace_total_ms`: records total LangGraph workflow trace duration.
+- `node_total_ms`, `tool_total_ms`, `model_total_ms`: break latency down by workflow nodes, tool calls, and model calls.
+- `slowest_node_ms`, `slowest_tool_ms`, `slowest_model_ms`: expose bottlenecks with the slowest component name as the evaluator comment.
+- `actual_total_tokens`, `estimated_total_tokens`: record token usage when available, with local estimates as fallback visibility.
 
 ## Run
 

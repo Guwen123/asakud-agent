@@ -26,6 +26,18 @@ def _score_text(message: str, assertions: dict[str, Any]) -> list[str]:
     if isinstance(max_chars, int) and max_chars > 0 and len(message) > max_chars:
         failures.append(f"message too long: {len(message)} > {max_chars}")
 
+    min_sentence_count = assertions.get("min_sentence_count")
+    if isinstance(min_sentence_count, int) and min_sentence_count > 0:
+        actual_sentences = _count_sentence_like_segments(message)
+        if actual_sentences < min_sentence_count:
+            failures.append(f"too few sentence-like segments: {actual_sentences} < {min_sentence_count}")
+
+    max_sentence_count = assertions.get("max_sentence_count")
+    if isinstance(max_sentence_count, int) and max_sentence_count > 0:
+        actual_sentences = _count_sentence_like_segments(message)
+        if actual_sentences > max_sentence_count:
+            failures.append(f"too many sentence-like segments: {actual_sentences} > {max_sentence_count}")
+
     for token in _string_list(assertions.get("must_contain", [])):
         if token not in message:
             failures.append(f"missing token: {token}")
@@ -101,6 +113,16 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item or "")]
+
+
+def _count_sentence_like_segments(message: str) -> int:
+    text = re.sub(r"https?://\S+", "", str(message or ""))
+    text = re.sub(r"\[[^\]]+\]\([^)]+\)", "", text)
+    segments = [
+        item.strip(" \t\r\n-*`>：:；;，,")
+        for item in re.split(r"[。！？!?]+|\n+", text)
+    ]
+    return sum(1 for item in segments if item)
 
 
 def _safe_int(value: Any, default: int) -> int:

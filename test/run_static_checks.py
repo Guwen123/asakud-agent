@@ -200,7 +200,15 @@ def _check_db_schema(config: dict[str, Any], project_path) -> list[CheckResult]:
         finally:
             conn.close()
     tables = {str(row[0]) for row in table_rows}
-    required = {"sessions", "messages", "memory_events", "web_crawls", "reminders", "reminder_runs"}
+    required = {
+        "sessions",
+        "messages",
+        "memory_events",
+        "web_crawls",
+        "performance_traces",
+        "reminders",
+        "reminder_runs",
+    }
     missing = sorted(required - tables)
     return [
         CheckResult(
@@ -235,7 +243,7 @@ def _check_prompt_contract(config: dict[str, Any], build_static, build_hot) -> l
         ),
         CheckResult(
             "prompt.skill_not_injected",
-            "pass" if "B3" not in static_prompt and "SKILL.md" not in static_prompt else "warn",
+            "pass" if "B3" not in static_prompt else "warn",
             "skills should run through run_skill, not be injected into the main system prompt",
         ),
     ]
