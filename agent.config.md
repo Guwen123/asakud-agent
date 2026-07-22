@@ -26,26 +26,26 @@ The program reads the fenced `json` block below as its runtime configuration.
   "main_model": {
     "provider": "asxs",
     "protocol": "openai-compatible",
-    "base_url": "https://api.asxs.top/v1",
-    "api_key": "sk-",
+    "base_url": "",
+    "api_key": "",
     "name": "gpt-5.5",
     "temperature": 0.2,
     "max_output_tokens": 4096
   },
   "route_model": {
-    "provider": "asxs",
+    "provider": "",
     "protocol": "openai-compatible",
-    "base_url": "https://api.asxs.top/v1",
-    "api_key": "sk-",
-    "name": "gpt-5.5",
+    "base_url": "",
+    "api_key": "",
+    "name": "",
     "temperature": 0.0,
     "max_output_tokens": 512
   },
   "multimodal_model": {
-    "provider": "asxs",
+    "provider": "",
     "protocol": "openai-compatible",
-    "base_url": "https://api.asxs.top/v1",
-    "api_key": "sk-",
+    "base_url": "",
+    "api_key": "",
     "name": "gpt-5.5",
     "temperature": 0.0,
     "max_output_tokens": 1024
