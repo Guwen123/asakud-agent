@@ -27,7 +27,7 @@ The program reads the fenced `json` block below as its runtime configuration.
     "provider": "asxs",
     "protocol": "openai-compatible",
     "base_url": "https://api.asxs.top/v1",
-    "api_key": "sk-2019a98bde0fe9a7acea8275322f8a13",
+    "api_key": "sk-",
     "name": "gpt-5.5",
     "temperature": 0.2,
     "max_output_tokens": 4096
@@ -36,7 +36,7 @@ The program reads the fenced `json` block below as its runtime configuration.
     "provider": "asxs",
     "protocol": "openai-compatible",
     "base_url": "https://api.asxs.top/v1",
-    "api_key": "sk-2019a98bde0fe9a7acea8275322f8a13",
+    "api_key": "sk-",
     "name": "gpt-5.5",
     "temperature": 0.0,
     "max_output_tokens": 512
@@ -45,7 +45,7 @@ The program reads the fenced `json` block below as its runtime configuration.
     "provider": "asxs",
     "protocol": "openai-compatible",
     "base_url": "https://api.asxs.top/v1",
-    "api_key": "sk-2019a98bde0fe9a7acea8275322f8a13",
+    "api_key": "sk-",
     "name": "gpt-5.5",
     "temperature": 0.0,
     "max_output_tokens": 1024
@@ -233,8 +233,8 @@ The program reads the fenced `json` block below as its runtime configuration.
     "default_timezone": "Asia/Shanghai"
   },
   "mcp": {
-    "enabled": false,
-    "default_server": "",
+    "enabled": true,
+    "default_server": "remote-math-mcp",
     "use_default_server": false,
     "servers": [
       {
@@ -246,6 +246,15 @@ The program reads the fenced `json` block below as its runtime configuration.
         "timeout_seconds": 5,
         "headers": {},
         "notes": "Disabled example only. Enable it only after you start a real MCP HTTP / Streamable HTTP gateway on this address, or add a real server from the dashboard."
+      },
+      {
+        "name": "remote-math-mcp",
+        "enabled": true,
+        "base_url": "https://stream-mcp.onrender.com",
+        "transport": "mcp-jsonrpc",
+        "endpoint": "/math/mcp",
+        "timeout_seconds": 5.0,
+        "headers": {}
       }
     ]
   },
@@ -268,7 +277,8 @@ The program reads the fenced `json` block below as its runtime configuration.
       "fetch_web",
       "create_reminder",
       "list_reminders",
-      "cancel_reminder"
+      "cancel_reminder",
+      "mcp"
     ]
   }
 }

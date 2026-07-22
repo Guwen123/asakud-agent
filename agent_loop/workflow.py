@@ -37,19 +37,22 @@ class AgentWorkflow:
             history_turn_count: int
             tool_step_count: int
             performance: dict[str, Any]
+            performance_persisted: bool
+            performance_persist_error: str
 
         workflow = StateGraph(WorkflowState)
-        workflow.add_node("import_db", self._timed_node("import_db", RunnableLambda(self._import_db_state)))
-        workflow.add_node("router_meme", self._timed_node("router_meme", self.nodes.get_router_meme_node()))
-        workflow.add_node("md_memory", self._timed_node("md_memory", self.nodes.get_md_memory_node()))
-        workflow.add_node("agent_model", self._timed_node("agent_model", self.nodes.get_agent_model_node()))
-        workflow.add_node("tools", self._timed_node("tools", self.nodes.get_tool_node()))
-        workflow.add_node("style", self._timed_node("style", self.nodes.get_style_node()))
-        workflow.add_node("save_long_term", self._timed_node("save_long_term", RunnableLambda(self._save_long_term_memory)))
-        workflow.add_node("trim_short_term", self._timed_node("trim_short_term", RunnableLambda(self._trim_short_term_memory)))
-        workflow.add_node("export_db", self._timed_node("export_db", RunnableLambda(self._export_db_state)))
-        workflow.add_node("save_skill", self._timed_node("save_skill", self.nodes.get_save_skill_node()))
-        workflow.add_node("print_meme", self._timed_node("print_meme", self.nodes.get_print_meme_node(), finalize=True))
+        self._add_timed_node(workflow, "import_db", RunnableLambda(self._import_db_state))
+        self._add_timed_node(workflow, "router_meme", self.nodes.get_router_meme_node())
+        self._add_timed_node(workflow, "md_memory", self.nodes.get_md_memory_node())
+        self._add_timed_node(workflow, "agent_model", self.nodes.get_agent_model_node())
+        self._add_timed_node(workflow, "tools", self.nodes.get_tool_node())
+        self._add_timed_node(workflow, "style", self.nodes.get_style_node())
+        self._add_timed_node(workflow, "save_long_term", RunnableLambda(self._save_long_term_memory))
+        self._add_timed_node(workflow, "trim_short_term", RunnableLambda(self._trim_short_term_memory))
+        self._add_timed_node(workflow, "export_db", RunnableLambda(self._export_db_state))
+        self._add_timed_node(workflow, "save_skill", self.nodes.get_save_skill_node())
+        self._add_timed_node(workflow, "print_meme", self.nodes.get_print_meme_node())
+        workflow.add_node("persist_performance", RunnableLambda(self._finalize_and_persist_performance))
 
         workflow.add_edge(START, "import_db")
         workflow.add_edge("import_db", "router_meme")
@@ -66,7 +69,8 @@ class AgentWorkflow:
         workflow.add_edge("trim_short_term", "export_db")
         workflow.add_edge("export_db", "save_skill")
         workflow.add_edge("save_skill", "print_meme")
-        workflow.add_edge("print_meme", END)
+        workflow.add_edge("print_meme", "persist_performance")
+        workflow.add_edge("persist_performance", END)
 
         self.graph = workflow
         return workflow
@@ -76,15 +80,19 @@ class AgentWorkflow:
             raise ValueError("Workflow not built. Call build_workflow() first.")
         return self.graph.compile()
 
-    def _timed_node(self, name: str, runnable: Runnable, *, finalize: bool = False) -> Runnable:
+    def _add_timed_node(self, workflow: StateGraph, name: str, runnable: Runnable) -> None:
+        workflow.add_node(name, self._timed_node(name, runnable))
+
+    def _timed_node(self, name: str, runnable: Runnable) -> Runnable:
         def _run(state: dict[str, Any]) -> dict[str, Any]:
-            result = time_node(state, name, runnable.invoke)
-            if finalize:
-                finalize_trace(result)
-                self._persist_performance_trace(result)
-            return result
+            return time_node(state, name, runnable.invoke)
 
         return RunnableLambda(_run)
+
+    def _finalize_and_persist_performance(self, state: dict[str, Any]) -> dict[str, Any]:
+        finalize_trace(state)
+        self._persist_performance_trace(state)
+        return state
 
     def _has_tool_calls(self, state: dict[str, Any]) -> str:
         messages = state.get("messages", [])

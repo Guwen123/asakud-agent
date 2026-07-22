@@ -24,6 +24,7 @@ from run_agent_eval import DEFAULT_CASES, cleanup_eval_side_effects, load_cases,
 
 DEFAULT_DATASET_NAME = "asakud-agent-regression"
 DEFAULT_EXPERIMENT_PREFIX = "asakud-agent-langsmith"
+LANGSMITH_SCORE_LIMIT = 99999.9999
 
 
 def main() -> int:
@@ -177,10 +178,7 @@ def response_shape_evaluator(outputs: dict[str, Any]) -> list[dict[str, Any]]:
             "score": 1 if message.strip() else 0,
             "comment": "message is non-empty" if message.strip() else "message is empty",
         },
-        {
-            "key": "latency_seconds",
-            "score": float(outputs.get("elapsed_seconds", 0.0) or 0.0),
-        },
+        _metric("latency_seconds", outputs.get("elapsed_seconds", 0.0)),
     ]
 
 
@@ -205,18 +203,18 @@ def latency_breakdown_evaluator(outputs: dict[str, Any]) -> list[dict[str, Any]]
 
     return [
         {"key": "performance_trace_present", "score": 1, "comment": str(trace.get("trace_id", "") or "")},
-        {"key": "trace_total_ms", "score": _number(trace.get("total_duration_ms"))},
-        {"key": "node_total_ms", "score": _sum_duration(nodes)},
-        {"key": "tool_total_ms", "score": _sum_duration(tools)},
-        {"key": "model_total_ms", "score": _sum_duration(models)},
-        {"key": "slowest_node_ms", "score": slowest_node["duration_ms"], "comment": slowest_node["label"]},
-        {"key": "slowest_tool_ms", "score": slowest_tool["duration_ms"], "comment": slowest_tool["label"]},
-        {"key": "slowest_model_ms", "score": slowest_model["duration_ms"], "comment": slowest_model["label"]},
+        _seconds_metric("trace_total_seconds", trace.get("total_duration_ms")),
+        _seconds_metric("node_total_seconds", _sum_duration(nodes)),
+        _seconds_metric("tool_total_seconds", _sum_duration(tools)),
+        _seconds_metric("model_total_seconds", _sum_duration(models)),
+        _seconds_metric("slowest_node_seconds", slowest_node["duration_ms"], label=slowest_node["label"]),
+        _seconds_metric("slowest_tool_seconds", slowest_tool["duration_ms"], label=slowest_tool["label"]),
+        _seconds_metric("slowest_model_seconds", slowest_model["duration_ms"], label=slowest_model["label"]),
         {"key": "node_count", "score": float(len(nodes))},
         {"key": "tool_count", "score": float(len(tools))},
         {"key": "model_call_count", "score": float(len(models))},
-        {"key": "actual_total_tokens", "score": _number(tokens.get("total_tokens"))},
-        {"key": "estimated_total_tokens", "score": _number(tokens.get("estimated_total_tokens"))},
+        _metric("actual_total_tokens", tokens.get("total_tokens")),
+        _metric("estimated_total_tokens", tokens.get("estimated_total_tokens")),
     ]
 
 
@@ -294,6 +292,25 @@ def _number(value: Any) -> float:
         return round(float(value or 0.0), 3)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _metric(key: str, value: Any, comment: str = "") -> dict[str, Any]:
+    raw = _number(value)
+    score = max(-LANGSMITH_SCORE_LIMIT, min(LANGSMITH_SCORE_LIMIT, raw))
+    if score != raw:
+        suffix = f"raw={raw}; capped to LangSmith score limit"
+        comment = f"{comment}; {suffix}" if comment else suffix
+    payload: dict[str, Any] = {"key": key, "score": score}
+    if comment:
+        payload["comment"] = comment
+    return payload
+
+
+def _seconds_metric(key: str, duration_ms: Any, *, label: str = "") -> dict[str, Any]:
+    raw_ms = _number(duration_ms)
+    seconds = round(raw_ms / 1000.0, 3)
+    comment = f"{label}; raw_ms={raw_ms}" if label else f"raw_ms={raw_ms}"
+    return _metric(key, seconds, comment=comment)
 
 
 def langsmith_dependency_error() -> str:

@@ -85,7 +85,7 @@ Run LangSmith side-effect/network cases:
 python test\run_langsmith_eval.py --include-side-effects --include-network
 ```
 
-The script creates a timestamped LangSmith dataset from the selected JSONL cases, runs the Agent as the target function, and records evaluator scores such as `contract_assertions`, `has_message`, `latency_seconds`, `trace_total_ms`, `node_total_ms`, `tool_total_ms`, `model_total_ms`, and token metrics.
+The script creates a timestamped LangSmith dataset from the selected JSONL cases, runs the Agent as the target function, and records evaluator scores such as `contract_assertions`, `has_message`, `latency_seconds`, `trace_total_seconds`, `node_total_seconds`, `tool_total_seconds`, `model_total_seconds`, and token metrics.
 
 ## Case Schema
 

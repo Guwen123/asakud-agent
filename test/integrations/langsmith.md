@@ -38,9 +38,9 @@ Implemented evaluators:
 - `has_message`: checks whether the Agent produced a non-empty user-facing answer.
 - `latency_seconds`: records local target function latency as a numeric metric.
 - `performance_trace_present`: checks whether `debug.performance` was preserved in the final Agent output.
-- `trace_total_ms`: records total LangGraph workflow trace duration.
-- `node_total_ms`, `tool_total_ms`, `model_total_ms`: break latency down by workflow nodes, tool calls, and model calls.
-- `slowest_node_ms`, `slowest_tool_ms`, `slowest_model_ms`: expose bottlenecks with the slowest component name as the evaluator comment.
+- `trace_total_seconds`: records total LangGraph workflow trace duration in seconds to stay within LangSmith feedback score limits.
+- `node_total_seconds`, `tool_total_seconds`, `model_total_seconds`: break latency down by workflow nodes, tool calls, and model calls.
+- `slowest_node_seconds`, `slowest_tool_seconds`, `slowest_model_seconds`: expose bottlenecks with the slowest component name and raw milliseconds as the evaluator comment.
 - `actual_total_tokens`, `estimated_total_tokens`: record token usage when available, with local estimates as fallback visibility.
 
 ## Run

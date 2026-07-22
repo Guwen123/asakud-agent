@@ -82,13 +82,34 @@ class LangSmithEvalTests(unittest.TestCase):
 
         by_key = {item["key"]: item for item in scores}
         self.assertEqual(by_key["performance_trace_present"]["score"], 1)
-        self.assertEqual(by_key["trace_total_ms"]["score"], 123.4)
-        self.assertEqual(by_key["node_total_ms"]["score"], 35.0)
-        self.assertEqual(by_key["tool_total_ms"]["score"], 50.0)
-        self.assertEqual(by_key["model_total_ms"]["score"], 40.0)
-        self.assertEqual(by_key["slowest_node_ms"]["comment"], "slow")
-        self.assertEqual(by_key["slowest_tool_ms"]["comment"], "fetch_web")
+        self.assertEqual(by_key["trace_total_seconds"]["score"], 0.123)
+        self.assertEqual(by_key["node_total_seconds"]["score"], 0.035)
+        self.assertEqual(by_key["tool_total_seconds"]["score"], 0.05)
+        self.assertEqual(by_key["model_total_seconds"]["score"], 0.04)
+        self.assertIn("slow", by_key["slowest_node_seconds"]["comment"])
+        self.assertIn("fetch_web", by_key["slowest_tool_seconds"]["comment"])
         self.assertEqual(by_key["actual_total_tokens"]["score"], 12.0)
+
+    def test_latency_breakdown_evaluator_uses_seconds_to_stay_within_langsmith_limits(self) -> None:
+        scores = latency_breakdown_evaluator(
+            {
+                "debug": {
+                    "performance": {
+                        "trace_id": "trace-long",
+                        "total_duration_ms": 229503.922,
+                        "nodes": [{"name": "slow", "duration_ms": 175340.559}],
+                        "tools": [],
+                        "model_calls": [],
+                        "tokens": {},
+                    }
+                }
+            }
+        )
+
+        by_key = {item["key"]: item for item in scores}
+        self.assertEqual(by_key["trace_total_seconds"]["score"], 229.504)
+        self.assertEqual(by_key["slowest_node_seconds"]["score"], 175.341)
+        self.assertLess(by_key["trace_total_seconds"]["score"], 99999.9999)
 
     def test_latency_breakdown_evaluator_reports_missing_trace(self) -> None:
         scores = latency_breakdown_evaluator({"message": "hello"})
